@@ -22,6 +22,12 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # setup-node writes an .npmrc containing ${NODE_AUTH_TOKEN}, and yarn expands
+    # env vars found in .npmrc as soon as it starts. Keep the token available to
+    # every step (not just the publish step) or `yarn install` fails with
+    # "Failed to replace env in config: ${NODE_AUTH_TOKEN}".
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:

@@ -1,4 +1,10 @@
-import { bytesToHexString, fromFarcasterTime, HubRpcClient, UserNameProof, UserNameType } from "@dimensiondev/hub-nodejs";
+import {
+  bytesToHexString,
+  fromFarcasterTime,
+  HubRpcClient,
+  UserNameProof,
+  UserNameType,
+} from "@dimensiondev/hub-nodejs";
 import { err, ok, Result } from "neverthrow";
 import { pino } from "pino";
 import { DB } from "./db";
