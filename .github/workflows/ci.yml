@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main]
 
+# Least privilege: CI only reads the repository.
+permissions:
+  contents: read
+
 # prevent multiple simultaneous test runs
 concurrency:
   group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
@@ -21,7 +25,8 @@ jobs:
         arch: ['arm64', 'x64']
         node_version: [22, 24, 26]
 
-    runs-on: ['runs-on=${{ github.run_id }}', 'runner=4cpu-linux-${{ matrix.arch }}']
+    # GitHub-hosted runners. The fork is public, so arm64 runners are available.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     name: test (Node ${{ matrix.node_version }}, ${{ matrix.arch }})
 
     services:
@@ -80,9 +85,3 @@ jobs:
 
       - name: Run tests
         run: yarn test:ci
-
-      - name: Upload coverage results
-        uses: codecov/codecov-action@v7
-        continue-on-error: true # Don't fail the build if codecov fails
-        timeout-minutes: 1
-

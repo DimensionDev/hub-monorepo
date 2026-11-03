@@ -1,17 +1,29 @@
-**/node_modules/
+# Version control
+.git
 **/.git
-**/README.md
-**/LICENSE
-**/.vscode
-**/npm-debug.log
+
+# Installed dependencies (installed inside the image)
+**/node_modules
+
+# Build output and caches (regenerated inside the image)
+**/dist
+**/build
+**/.turbo
 **/coverage
+.analysis
+
+# Local environment and secrets
 **/.env
-**/.editorconfig
-**/.aws
-**/.github
 **/.hub
 **/.rocks
-**/build
+**/.aws
+**/.vscode
 **/.husky
-**/dist
+
+# Repo metadata and docs that the image build does not need
+**/.github
+**/.editorconfig
+**/README.md
+**/LICENSE
+**/npm-debug.log
 **/Dockerfile*
