@@ -1,6 +1,6 @@
 # NobleEd25519Signer
 
-An Ed25519Signer that is initialized with an Ed25519 key pair and can be used with [Builders](https://github.com/farcasterxyz/hub-monorepo/blob/main/packages/hub-nodejs/docs/Builders.md) to sign Farcaster Messages.
+An Ed25519Signer that is initialized with an Ed25519 key pair and can be used with [Builders](https://github.com/DimensionDev/hub-monorepo/blob/main/packages/hub-nodejs/docs/Builders.md) to sign Farcaster Messages.
 
 ## Properties
 
@@ -15,7 +15,7 @@ An Ed25519Signer that is initialized with an Ed25519 key pair and can be used wi
 #### Usage
 
 ```typescript
-import { NobleEd25519Signer } from '@farcaster/hub-nodejs';
+import { NobleEd25519Signer } from '@dimensiondev/hub-nodejs';
 import * as ed from '@noble/ed25519';
 
 const privateKeyBytes = ed.utils.randomPrivateKey();

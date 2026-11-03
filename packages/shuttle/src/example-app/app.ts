@@ -13,7 +13,7 @@ import {
   HubSubscriber,
   MessageState,
   OnChainEventBodyJson,
-} from "../index"; // If you want to use this as a standalone app, replace this import with "@farcaster/shuttle"
+} from "../index"; // If you want to use this as a standalone app, replace this import with "@dimensiondev/shuttle"
 import { AppDb, migrateToLatest, Tables } from "./db";
 import {
   bytesToHexString,
@@ -30,7 +30,7 @@ import {
   isStorageRentOnChainEvent,
   isTierPurchaseOnChainEvent,
   Message,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
 import { readFileSync } from "fs";

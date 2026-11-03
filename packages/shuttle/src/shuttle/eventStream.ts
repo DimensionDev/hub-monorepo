@@ -8,7 +8,7 @@ import {
   HubEvent,
   HubEventType,
   isBlockConfirmedHubEvent,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { log } from "../log";
 import { pino } from "pino";
 import { ProcessResult } from "./index";

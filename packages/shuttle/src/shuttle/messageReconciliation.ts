@@ -8,7 +8,7 @@ import {
   Message,
   MessagesResponse,
   MessageType,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { DB, MessageRow, sql } from "./db";
 import { pino } from "pino";
 import { ok, err } from "neverthrow";

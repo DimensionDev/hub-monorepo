@@ -1,4 +1,4 @@
-import { HubEvent, HubEventType, HubRpcClient } from "@farcaster/hub-nodejs";
+import { HubEvent, HubEventType, HubRpcClient } from "@dimensiondev/hub-nodejs";
 import { jest } from "@jest/globals";
 import { pino } from "pino";
 import { EventStreamConnection } from "./eventStream";

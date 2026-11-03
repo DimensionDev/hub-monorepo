@@ -15,7 +15,7 @@ getInsecureHubRpcClient returns a Hub RPC Client. Use getSSLHubRpcClient if the 
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 // Instantiate the gRPC client for a secure connection
 const client = getSSLHubRpcClient('testnet1.farcaster.xyz:2283');
@@ -105,7 +105,7 @@ successful response of type `<T>` or an error value. There are three types of re
 Results always return an object of type `Message` instead of a more specific type like `CastAddMessage` due to a quirk of the protobuf-generated types. This can be easily remedied by passing responses through a typeguard:
 
 ```typescript
-import { isCastAddMessage } from '@farcaster/hub-nodejs';
+import { isCastAddMessage } from '@dimensiondev/hub-nodejs';
 
 // See getCast documentation below for more details on this
 const castResult = await client.getCast({ fid: 2, hash: castHashBytes });
@@ -124,7 +124,7 @@ if (castResult.isOk()) {
 Methods that return multiple values support pagination in requests with a `pageSize` and `pageToken` property.
 
 ```typescript
-import { getSSLHubRpcClient, HubResult, MessagesResponse } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, HubResult, MessagesResponse } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -171,7 +171,7 @@ Returns an active signer message given a fid and the public key of the signer.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -219,7 +219,7 @@ Returns all active signers created by a fid in reverse chronological order.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -263,7 +263,7 @@ Returns all active and inactive signers created by an fid in reverse chronologic
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -307,7 +307,7 @@ Returns a specific piece of metadata about the user.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, UserDataType } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, UserDataType } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -349,7 +349,7 @@ Returns all metadata about the user.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -397,7 +397,7 @@ Returns an active cast for a user.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -441,7 +441,7 @@ Returns active casts for a user in reverse chronological order.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -485,7 +485,7 @@ Returns all active casts that mention an fid in reverse chronological order.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -529,7 +529,7 @@ Returns all active casts that are replies to a specific cast in reverse chronolo
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -576,7 +576,7 @@ Returns all active and inactive casts for a user in reverse chronological order.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -620,7 +620,7 @@ Returns an active reaction of a particular type made by a user to a cast.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes, ReactionType } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes, ReactionType } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -673,7 +673,7 @@ Returns all active reactions made by users to a cast.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes, ReactionType } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes, ReactionType } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -727,7 +727,7 @@ Returns all active reactions made by a user in reverse chronological order.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, ReactionType } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, ReactionType } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -771,7 +771,7 @@ Returns all active and inactive reactions made by a user in reverse chronologica
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -815,7 +815,7 @@ Returns an active verification for a specific Ethereum address made by a user.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -860,7 +860,7 @@ Returns all active verifications for Ethereum addresses made by a user in revers
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -908,7 +908,7 @@ Returns all active and inactive verifications for Ethereum addresses made by a u
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -960,7 +960,7 @@ which helps with recovery when clients get disconnected temporarily.
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, HubEventType } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, HubEventType } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -1011,7 +1011,7 @@ Submits a new message to the Hub. A Hub can choose to require basic authenticati
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient, getAuthMetadata } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient, getAuthMetadata } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -1058,7 +1058,7 @@ Returns the on-chain event most recently associated with changing an fid's owner
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);
@@ -1098,7 +1098,7 @@ Returns the onchain event most recently associated with changing an fname's owne
 #### Usage
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 const hubRpcEndpoint = 'testnet1.farcaster.xyz:2283';
 const client = getSSLHubRpcClient(hubRpcEndpoint);

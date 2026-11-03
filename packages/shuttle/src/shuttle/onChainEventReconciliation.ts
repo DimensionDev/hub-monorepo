@@ -5,7 +5,7 @@ import {
   OnChainEvent,
   OnChainEventResponse,
   OnChainEventType,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { err, ok } from "neverthrow";
 import { pino } from "pino";
 import { extendStackTrace } from "../utils";

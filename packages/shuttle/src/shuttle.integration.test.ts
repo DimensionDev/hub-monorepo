@@ -15,7 +15,7 @@ import {
   MessagesResponse,
   Metadata,
   getFarcasterTime,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import {
   RedisClient,
   HubSubscriber,
@@ -38,7 +38,7 @@ import {
   UserNameProof,
   UserNameType,
   UsernameProofsResponse,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { err, ok } from "neverthrow";
 import { bytesToHex } from "./utils";
 

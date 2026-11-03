@@ -11,7 +11,7 @@ import type {
   ServiceError,
 } from "@grpc/grpc-js";
 import { err, ok } from "neverthrow";
-import { HubError, HubErrorCode, HubResult } from "@farcaster/core";
+import { HubError, HubErrorCode, HubResult } from "@dimensiondev/core";
 
 const fromServiceError = (err: ServiceError): HubError => {
   let context = err.details;

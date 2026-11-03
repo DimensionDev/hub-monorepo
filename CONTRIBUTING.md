@@ -277,23 +277,20 @@ when the repo manager runs a release process.
 
 ### 3.6 Releasing Versions
 
-Permission to publish to the @farcaster organization in NPM is necessary. This is a non-reversible process so if you
-are at all unsure about how to proceed, please reach out to Varun ([Github](https://github.com/varunsrin) | [Farcaster](https://farcaster.xyz/v))
+Releases are published to the GitHub Packages npm registry (`npm.pkg.github.com`) under the `@dimensiondev` scope.
+Publishing requires write access to the DimensionDev/hub-monorepo repository; the workflow authenticates with the
+built-in `GITHUB_TOKEN`, so no personal npm token is needed.
 
-1. Checkout a new branch and run `yarn changeset version`
-2. Review CHANGELOG.md and confirm that it is accurate
+1. Merge your PR (including its changeset) into `main`
+2. The `Release Packages` workflow opens a "Version Packages" PR. Review the changelog and version bumps in it
 3. Check that `package.json` was bumped correctly
-3. If the protocol version changes, bump `FARCASTER_VERSIONS_SCHEDULE` and  `FARCASTER_VERSION`
-4. Create commit, merge to main, check out commit on main and run `yarn build`
-5. Publish changes by running `yarn changeset publish`
-6. Fetch and update tags with `git fetch origin --tags && yarn changeset tag && git tag -f @latest`
-7. Delete the biome tags `git tag -d biome-config-custom@0.0.1`
-8. Push tags with `git push origin HEAD --tags -f`
-9. If this is a non-patch change, create an NFT for the release.
+4. If the protocol version changes, bump `FARCASTER_VERSIONS_SCHEDULE` and `FARCASTER_VERSION`
+5. Merge the "Version Packages" PR. The workflow then runs `yarn build && yarn changeset publish` and pushes the release tags
+6. If a publish needs to be re-run, trigger the `Release Packages` workflow manually from the Actions tab
 
 ### 3.7 Working in Rust
 
-Some of the CPU intensive code is written in Rust for speed. We import the Rust modules via [Neon](https://neon-bindings.com/) that are built as a part of the `@farcaster/core` package.
+Some of the CPU intensive code is written in Rust for speed. We import the Rust modules via [Neon](https://neon-bindings.com/) that are built as a part of the `@dimensiondev/core` package.
 
 To add new code to Rust,
 1. Add it to `packages/core/src/addon/`
@@ -302,8 +299,13 @@ To add new code to Rust,
 
 ## 4. Troubleshooting
 
-### Releasing to NPM
+### Releasing to GitHub Packages
 
-1. Use `npm adduser` to log into the account that can publish to @farcaster on npm
+The automated release is described in [Releasing Versions](#36-releasing-versions). For a local fallback publish:
+
+1. Authenticate npm against GitHub Packages, e.g.
+   `npm login --scope=@dimensiondev --auth-type=legacy --registry=https://npm.pkg.github.com`
+   (username: your GitHub username, password: a classic PAT with the `write:packages` scope)
 2. Make a branch, run `yarn changeset version` and merge the changes into main
-3. Pull latest main, run `yarn changeset publish`
+3. Pull latest main, run `yarn build && yarn changeset publish`
+4. Push the generated tags with `git push origin --tags`

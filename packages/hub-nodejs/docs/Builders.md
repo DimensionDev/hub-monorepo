@@ -30,7 +30,7 @@ Before you can build messages, you'll need to construct the following objects:
 A Ed25519Signer is an EdDSA key pair which is necessary for signing most messages on behalf of an fid. This example below shows how to construct a new `NobleEd25519Signer` using the [@noble](https://paulmillr.com/noble/) library:
 
 ```typescript
-import { NobleEd25519Signer } from '@farcaster/hub-nodejs';
+import { NobleEd25519Signer } from '@dimensiondev/hub-nodejs';
 import * as ed from '@noble/ed25519';
 
 const privateKey = ed.utils.randomPrivateKey(); // Applications must store this key securely.
@@ -43,7 +43,7 @@ const ed25519Signer = new NobleEd25519Signer(privateKey);
 An Eip712Signer is an ECDSA key pair that is necessary signing for some messages like `SignerAdds` and `Verifications`. This example shows how to construct an `EthersEip712Signer` from a wallet's recovery phrase:
 
 ```typescript
-import { EthersEip712Signer } from '@farcaster/hub-nodejs';
+import { EthersEip712Signer } from '@dimensiondev/hub-nodejs';
 import { Wallet } from 'ethers';
 
 const mnemonic = 'ordinary long coach bounce thank quit become youth belt pretty diet caught attract melt bargain';
@@ -61,7 +61,7 @@ Common message properties that must be passed into to any Builder method to prod
 #### Usage
 
 ```typescript
-import { FarcasterNetwork, toFarcasterTime } from '@farcaster/hub-nodejs';
+import { FarcasterNetwork, toFarcasterTime } from '@dimensiondev/hub-nodejs';
 
 const unixTimestamp = 1679029607159;
 
@@ -92,7 +92,7 @@ Returns a message that authorizes a new Ed25519 Signer to create messages on beh
 #### Usage
 
 ```typescript
-import { makeSignerAdd, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { makeSignerAdd, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const signerHex = '0x027fb58156b2733495acb24248e5e3ddf7ad8be4b85321c1e598e06ed030f51f'; // public key of the Ed25519 key-pair to authorize
 const signerBytes = hexStringToBytes(signerHex)._unsafeUnwrap(); // Safety: signerHex is known and cannot error
@@ -124,7 +124,7 @@ Returns a message that revokes a previously authorized Ed25519 Signer.
 #### Usage
 
 ```typescript
-import { makeSignerRemove, hexStringToBytes } from '@farcaster/hub-nodejs';
+import { makeSignerRemove, hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 const signerHex = '0x027fb58156b2733495acb24248e5e3ddf7ad8be4b85321c1e598e06ed030f51f'; // public key of the Ed25519 key-pair to revoke
 const signerBytes = hexStringToBytes(signerHex)._unsafeUnwrap(); // Safety: signerHex is known and cannot error
@@ -155,7 +155,7 @@ Returns a message that adds a new Cast.
 #### Usage
 
 ```typescript
-import { makeCastAdd } from '@farcaster/hub-nodejs';
+import { makeCastAdd } from '@dimensiondev/hub-nodejs';
 
 const cast = await makeCastAdd(
   { text: 'hello world', embeds: ['http://www.farcaster.xyz'], mentions: [], mentionsPositions: [] },
@@ -187,7 +187,7 @@ Returns a message that removes an existing Cast.
 #### Usage
 
 ```typescript
-import { hexStringToBytes, makeCastRemove } from '@farcaster/hub-nodejs';
+import { hexStringToBytes, makeCastRemove } from '@dimensiondev/hub-nodejs';
 
 const targetHashHex = '006f082f70dfb2de81e7852f3b79f1cdf2aa6b86';
 
@@ -226,7 +226,7 @@ Returns a message that adds a Reaction to an existing Cast.
 #### Usage
 
 ```typescript
-import { hexStringToBytes, makeReactionAdd, ReactionType } from '@farcaster/hub-nodejs';
+import { hexStringToBytes, makeReactionAdd, ReactionType } from '@dimensiondev/hub-nodejs';
 
 const targetHashHex = '006f082f70dfb2de81e7852f3b79f1cdf2aa6b86';
 // Safety: targetHashHex is known and can't error
@@ -266,7 +266,7 @@ Returns a message that removes an existing Reaction to an existing Cast.
 #### Usage
 
 ```typescript
-import { hexStringToBytes, makeReactionRemove, ReactionType } from '@farcaster/hub-nodejs';
+import { hexStringToBytes, makeReactionRemove, ReactionType } from '@dimensiondev/hub-nodejs';
 
 const targetHashHex = '006f082f70dfb2de81e7852f3b79f1cdf2aa6b86';
 
@@ -307,7 +307,7 @@ Returns a message that updates metadata about the user.
 #### Usage
 
 ```typescript
-import { makeUserDataAdd, UserDataType } from '@farcaster/hub-nodejs';
+import { makeUserDataAdd, UserDataType } from '@dimensiondev/hub-nodejs';
 
 const userDataPfpBody = {
   type: UserDataType.PFP,
@@ -345,7 +345,7 @@ import {
   hexStringToBytes,
   makeVerificationAddEthAddress,
   makeVerificationEthAddressClaim,
-} from '@farcaster/hub-nodejs';
+} from '@dimensiondev/hub-nodejs';
 
 // Safety: eip712Signer is known and can't error
 const addressBytes = (await eip712Signer.getSignerKey())._unsafeUnwrap();
@@ -397,7 +397,7 @@ Returns a message that removes a previously added Verification.
 #### Usage
 
 ```typescript
-import { makeVerificationRemove } from '@farcaster/hub-nodejs';
+import { makeVerificationRemove } from '@dimensiondev/hub-nodejs';
 
 // Safety: eip712Signer is known and can't error
 const addressBytes = (await eip712Signer.getSignerKey())._unsafeUnwrap();

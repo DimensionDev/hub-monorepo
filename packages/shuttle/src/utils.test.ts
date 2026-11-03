@@ -1,4 +1,4 @@
-import { Message, MessageType, UserDataType } from "@farcaster/hub-nodejs";
+import { Message, MessageType, UserDataType } from "@dimensiondev/hub-nodejs";
 import { convertProtobufMessageBodyToJson, scrubStringFieldsForPostgresJson } from "./utils";
 
 // Constructs a barely-valid Message-shaped object for routing through the

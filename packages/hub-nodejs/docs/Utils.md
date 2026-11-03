@@ -27,7 +27,7 @@ Returns a hex string from a bytes array.
 #### Usage
 
 ```typescript
-import { bytesToHexString } from '@farcaster/hub-nodejs';
+import { bytesToHexString } from '@dimensiondev/hub-nodejs';
 
 // Safety: byteArray is known and can't error
 const byteArray = new Uint8Array([1, 2, 3]); // can be bytes signature, address, etc
@@ -56,7 +56,7 @@ Returns a bytes array from a hex string.
 #### Usage
 
 ```typescript
-import { hexStringToBytes } from '@farcaster/hub-nodejs';
+import { hexStringToBytes } from '@dimensiondev/hub-nodejs';
 
 // Safety: hexString is known and can't error
 const hexString = '0x010203'; // can be signature, address, etc
@@ -105,7 +105,7 @@ console.log(utfEncodedStr); //"Hello"
 
 ## Errors
 
-Error handling in @farcaster/hub-nodejs is monadic and functions do not throw exceptions. Each function call returns a Result object which contains a success value or error value. Read the [neverthrow](https://github.com/supermacro/neverthrow/blob/master/README.md) documentation to learn about handling Result types.
+Error handling in @dimensiondev/hub-nodejs is monadic and functions do not throw exceptions. Each function call returns a Result object which contains a success value or error value. Read the [neverthrow](https://github.com/supermacro/neverthrow/blob/master/README.md) documentation to learn about handling Result types.
 
 ### Hub Error
 
@@ -145,7 +145,7 @@ Returns the current time in seconds as a Farcaster timestamp.
 #### Usage
 
 ```typescript
-import { getFarcasterTime } from '@farcaster/hub-nodejs';
+import { getFarcasterTime } from '@dimensiondev/hub-nodejs';
 
 const timestamp = getFarcasterTime()._unsafeUnwrap();
 console.log(timestamp); // 70117755
@@ -166,7 +166,7 @@ Converts a Unix milliseconds timestamp to a Farcaster seconds timestamp.
 #### Usage
 
 ```typescript
-import { toFarcasterTime } from '@farcaster/hub-nodejs';
+import { toFarcasterTime } from '@dimensiondev/hub-nodejs';
 
 const msTimestamp = Date.now(); // can be anything, e.g., ethereum transaction timestamp
 const timestamp = toFarcasterTime(msTimestamp)._unsafeUnwrap();
@@ -194,7 +194,7 @@ Converts a Farcaster seconds timestamp to a Unix milliseconds timestamp.
 #### Usage
 
 ```typescript
-import { fromFarcasterTime } from '@farcaster/hub-nodejs';
+import { fromFarcasterTime } from '@dimensiondev/hub-nodejs';
 
 const timestamp = 70160902; // Farcaster timestamp in seconds
 const msTimestamp = fromFarcasterTime(timestamp)._unsafeUnwrap();
@@ -225,7 +225,7 @@ import {
   FarcasterNetwork,
   hexStringToBytes,
   makeVerificationEthAddressClaim,
-} from '@farcaster/hub-nodejs';
+} from '@dimensiondev/hub-nodejs';
 import { Wallet } from 'ethers';
 
 // Create a valid Eip712Signer from the Ethereum Address making the claim

@@ -1,5 +1,5 @@
 {
-  "name": "@farcaster/hub-web",
+  "name": "@dimensiondev/hub-web",
   "version": "0.14.0",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -17,8 +17,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farcasterxyz/hub-monorepo.git",
+    "url": "https://github.com/DimensionDev/hub-monorepo.git",
     "directory": "packages/hub-web"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "tsup --config tsup.config.ts",
@@ -33,7 +36,7 @@
     "ts-proto": "1.181.2"
   },
   "dependencies": {
-    "@farcaster/core": "^0.21.0",
+    "@dimensiondev/core": "^0.21.0",
     "@improbable-eng/grpc-web": "^0.15.0",
     "rxjs": "^7.8.0"
   }

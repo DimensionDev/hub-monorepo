@@ -1,4 +1,4 @@
-# @farcaster/hub-web
+# @dimensiondev/hub-web
 
 **Deprecation Notice:**
 grpc-web has been deprecated and is no longer supported. Please use the [HTTP API](./README.md) instead. This original document has been kept only for historical reference.
@@ -15,22 +15,22 @@ A lightweight, fast Typescript interface for Farcaster Hubs. Designed to work wi
 
 ## Installation
 
-Install @farcaster/hub-web with the package manager of your choice
+Install @dimensiondev/hub-web with the package manager of your choice
 
 ```bash
-npm install @farcaster/hub-web
-yarn add @farcaster/hub-web
-pnpm install @farcaster/hub-web
+npm install @dimensiondev/hub-web
+yarn add @dimensiondev/hub-web
+pnpm install @dimensiondev/hub-web
 ```
 
 ## Documentation
 
-The @farcaster/hub-web APIs are largely the same as @farcaster/hub-nodejs. Read the [@farcaster/hub-nodejs documentation](https://github.com/farcasterxyz/hubble/tree/main/packages/hub-nodejs/docs) and browse code [examples](https://github.com/farcasterxyz/hubble/tree/main/packages/hub-nodejs/examples). We're also including sample @farcaster/hub-web code below as well as a list of differences with the other package.
+The @dimensiondev/hub-web APIs are largely the same as @dimensiondev/hub-nodejs. Read the [@dimensiondev/hub-nodejs documentation](https://github.com/farcasterxyz/hubble/tree/main/packages/hub-nodejs/docs) and browse code [examples](https://github.com/farcasterxyz/hubble/tree/main/packages/hub-nodejs/examples). We're also including sample @dimensiondev/hub-web code below as well as a list of differences with the other package.
 
 ### Getting start: fetching casts
 
 ```typescript
-import { getHubRpcClient } from '@farcaster/hub-web';
+import { getHubRpcClient } from '@dimensiondev/hub-web';
 
 (async () => {
   const client = getHubRpcClient('https://testnet1.farcaster.xyz:2285');
@@ -43,12 +43,12 @@ import { getHubRpcClient } from '@farcaster/hub-web';
 
 ### Instantiating a client
 
-The method to construct a Hub gRPC client differs from @farcaster/hub-nodejs. Use `getHubRpcClient`, which returns a Hub gRPC-Web client. Make sure that the gRPC server you're connecting to implements a gRPC-Web proxy. The standard is to expose the gRPC-Web proxy at port 2285.
+The method to construct a Hub gRPC client differs from @dimensiondev/hub-nodejs. Use `getHubRpcClient`, which returns a Hub gRPC-Web client. Make sure that the gRPC server you're connecting to implements a gRPC-Web proxy. The standard is to expose the gRPC-Web proxy at port 2285.
 
 #### Usage
 
 ```typescript
-import { getHubRpcClient } from '@farcaster/hub-web';
+import { getHubRpcClient } from '@dimensiondev/hub-web';
 
 (async () => {
   const client = getHubRpcClient('https://testnet1.farcaster.xyz:2285');
@@ -73,12 +73,12 @@ import { getHubRpcClient } from '@farcaster/hub-web';
 
 ### Streaming hub events
 
-gRPC-Web hub event streams are instances of the [Observable class](https://rxjs.dev/guide/observable) in @farcaster/hub-web.
+gRPC-Web hub event streams are instances of the [Observable class](https://rxjs.dev/guide/observable) in @dimensiondev/hub-web.
 
 #### Usage
 
 ```typescript
-import { getHubRpcClient } from '@farcaster/hub-web';
+import { getHubRpcClient } from '@dimensiondev/hub-web';
 
 async () => {
   const client = getHubRpcClient('https://testnet1.farcaster.xyz:2285');

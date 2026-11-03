@@ -1,6 +1,6 @@
 # EthersEip712Signer
 
-An Eip712Signer that is initialized with an [Ethers v6](https://github.com/ethers-io/ethers.js/) Ethereum wallet and can be used with [Builders](https://github.com/farcasterxyz/hub-monorepo/blob/main/packages/hub-nodejs/docs/Builders.md) to sign Farcaster Messages. If you're looking for Ethers v5 support, see [this troubleshooting guide](../README.md#ethers-v5).
+An Eip712Signer that is initialized with an [Ethers v6](https://github.com/ethers-io/ethers.js/) Ethereum wallet and can be used with [Builders](https://github.com/DimensionDev/hub-monorepo/blob/main/packages/hub-nodejs/docs/Builders.md) to sign Farcaster Messages. If you're looking for Ethers v5 support, see [this troubleshooting guide](../README.md#ethers-v5).
 
 ## Properties
 
@@ -15,7 +15,7 @@ An Eip712Signer that is initialized with an [Ethers v6](https://github.com/ether
 ### Usage
 
 ```typescript
-import { EthersEip712Signer } from '@farcaster/hub-nodejs';
+import { EthersEip712Signer } from '@dimensiondev/hub-nodejs';
 import { Wallet } from 'ethers';
 
 const mnemonic = 'ordinary long coach bounce thank quit become youth belt pretty diet caught attract melt bargain';
@@ -91,7 +91,7 @@ Generates a 256-bit signature for a VerificationClaim and returns the bytes.
 #### Usage
 
 ```typescript
-import { FarcasterNetwork, hexStringToBytes, makeVerificationEthAddressClaim } from '@farcaster/hub-nodejs';
+import { FarcasterNetwork, hexStringToBytes, makeVerificationEthAddressClaim } from '@dimensiondev/hub-nodejs';
 
 const blockHashHex = '0x1d3b0456c920eb503450c7efdcf9b5cf1f5184bf04e5d8ecbcead188a0d02018';
 const blockHashBytes = hexStringToBytes(blockHashHex)._unsafeUnwrap(); // Safety: blockHashHex is known and can't error
@@ -136,7 +136,7 @@ Generates a 256-bit signature for a UserNameProofClaim and returns the bytes.
 #### Usage
 
 ```typescript
-import { makeUserNameProofClaim } from '@farcaster/hub-nodejs';
+import { makeUserNameProofClaim } from '@dimensiondev/hub-nodejs';
 
 const claim = makeUserNameProofClaim({
   owner: '0x8773442740c17c9d0f0b87022c722f9a136206ed',

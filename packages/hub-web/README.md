@@ -1,4 +1,4 @@
-# @farcaster/hub-web
+# @dimensiondev/hub-web
 
 A fast and easy REST-like interface to work with Farcaster Hubs. Designed to work with [Hubble](https://github.com/farcasterxyz/hubble/) and any other Hub that implements the [Farcaster protocol](https://github.com/farcasterxyz/protocol).
 
@@ -10,10 +10,10 @@ A fast and easy REST-like interface to work with Farcaster Hubs. Designed to wor
 
 ## Installation
 
-The examples in this package use `axios` to make HTTP requests, but you can use any library. It is also useful to install the `@farcaster/core` library which has several helper methods that are useful while working with Farcaster messages.
+The examples in this package use `axios` to make HTTP requests, but you can use any library. It is also useful to install the `@dimensiondev/core` library which has several helper methods that are useful while working with Farcaster messages.
 
 ```bash
-yarn add axios @farcaster/core
+yarn add axios @dimensiondev/core
 yarn add -D @types/axios 
 ```
 

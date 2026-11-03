@@ -13,7 +13,7 @@ import {
   isVerificationAddAddressMessage,
   isVerificationRemoveMessage,
   Message,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { DB, DBTransaction } from "./db";
 import { MessageProcessor } from "./messageProcessor";
 import { MessageHandler, MessageState, StoreMessageOperation } from "./";

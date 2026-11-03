@@ -11,7 +11,7 @@ export type {
   ServerWritableStream,
 } from "@grpc/grpc-js";
 
-export * from "@farcaster/core";
+export * from "@dimensiondev/core";
 
 export * from "./generated/rpc";
 export * from "./client";

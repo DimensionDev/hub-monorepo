@@ -1,4 +1,4 @@
-import { HubEvent, Message } from "@farcaster/hub-nodejs";
+import { HubEvent, Message } from "@dimensiondev/hub-nodejs";
 import { DB } from "./db";
 
 export * from "./db";

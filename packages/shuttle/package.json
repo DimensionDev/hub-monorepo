@@ -1,5 +1,5 @@
 {
-  "name": "@farcaster/shuttle",
+  "name": "@dimensiondev/shuttle",
   "version": "1.0.5",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -17,12 +17,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farcasterxyz/hub-monorepo.git",
+    "url": "https://github.com/DimensionDev/hub-monorepo.git",
     "directory": "packages/shuttle"
   },
   "dependencies": {
     "@farcaster/hot-shots": "^10.0.0",
-    "@farcaster/hub-nodejs": "^0.18.0",
+    "@dimensiondev/hub-nodejs": "^0.18.0",
     "commander": "11.0.0",
     "dotenv": "16.4.5",
     "ioredis": "^5.3.2",
@@ -34,6 +34,9 @@
     "pino-pretty": "^10.0.0",
     "sql-formatter": "^13.0.0",
     "tiny-typed-emitter": "^2.1.0"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "tsup --config tsup.config.ts",

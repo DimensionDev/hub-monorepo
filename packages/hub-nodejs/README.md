@@ -1,4 +1,4 @@
-# @farcaster/hub-nodejs
+# @dimensiondev/hub-nodejs
 
 A lightweight, fast Typescript interface for Farcaster Hubs. Designed to work with [Hubble](https://github.com/farcasterxyz/hubble/) and any other Hub that implements the [Farcaster protocol](https://github.com/farcasterxyz/protocol).
 
@@ -13,12 +13,12 @@ Read the [documentation](https://github.com/farcasterxyz/hubble/tree/main/packag
 
 ## Installation
 
-Install @farcaster/hub-nodejs with the package manager of your choice
+Install @dimensiondev/hub-nodejs with the package manager of your choice
 
 ```bash
-npm install @farcaster/hub-nodejs
-yarn add @farcaster/hub-nodejs
-pnpm install @farcaster/hub-nodejs
+npm install @dimensiondev/hub-nodejs
+yarn add @dimensiondev/hub-nodejs
+pnpm install @dimensiondev/hub-nodejs
 ```
 
 ## Quickstart
@@ -26,7 +26,7 @@ pnpm install @farcaster/hub-nodejs
 ### Fetching Data from Hubs
 
 ```typescript
-import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
+import { getSSLHubRpcClient } from '@dimensiondev/hub-nodejs';
 
 client.$.waitForReady(Date.now() + 5000, async (e) => {
   if (e) {

@@ -4,7 +4,7 @@ import {
   HubEvent,
   HubEventType,
   HubRpcClient,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { err, ok, Result } from "neverthrow";
 import { Logger } from "../log";
 import { TypedEmitter } from "tiny-typed-emitter";

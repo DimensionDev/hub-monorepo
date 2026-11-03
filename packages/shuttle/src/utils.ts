@@ -1,6 +1,6 @@
 import { DeleteQueryBuilder, InsertQueryBuilder, SelectQueryBuilder, UpdateQueryBuilder } from "kysely";
 import { format as formatSql } from "sql-formatter";
-import { bytesToBase58, fromFarcasterTime, Message, MessageType, Protocol } from "@farcaster/hub-nodejs";
+import { bytesToBase58, fromFarcasterTime, Message, MessageType, Protocol } from "@dimensiondev/hub-nodejs";
 import { MessageBodyJson, VerificationProtocol } from "./shuttle/db";
 
 export function extendStackTrace(
@@ -267,7 +267,7 @@ export function convertProtobufMessageBodyToJson(message: Message): MessageBodyJ
       break;
     }
     default:
-      // TODO: Once we update types in upstream @farcaster/hub-nodejs, switch to this
+      // TODO: Once we update types in upstream @dimensiondev/hub-nodejs, switch to this
       // assertUnreachable(message.data.type);
       throw new Error(`Unknown message type ${message.data?.type}`);
   }

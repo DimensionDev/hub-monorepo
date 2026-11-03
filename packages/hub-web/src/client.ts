@@ -4,7 +4,7 @@ import { AdminService, AdminServiceClientImpl } from "./generated/admin_rpc";
 
 import grpcWeb from "@improbable-eng/grpc-web";
 import { err, ok } from "neverthrow";
-import { HubError, HubErrorCode, HubResult } from "@farcaster/core";
+import { HubError, HubErrorCode, HubResult } from "@dimensiondev/core";
 import { Observable } from "rxjs";
 
 export { Observable } from "rxjs";

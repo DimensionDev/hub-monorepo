@@ -8,7 +8,7 @@ import {
   isPruneMessageHubEvent,
   isRevokeMessageHubEvent,
   isMergeMessageHubEvent,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { bytesToHex } from "../utils";
 
 export type HubClient = {

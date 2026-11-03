@@ -8,7 +8,7 @@ import { Factories } from "./factories";
 import { fromFarcasterTime, getFarcasterTime } from "./time";
 import * as validations from "./validations";
 import { makeVerificationAddressClaim } from "./verifications";
-import { CastAddBody, makeCastAdd, makeCastAddData, UserDataType, UserNameType } from "@farcaster/hub-nodejs";
+import { CastAddBody, makeCastAdd, makeCastAddData, UserDataType, UserNameType } from "@dimensiondev/hub-nodejs";
 import { defaultL1PublicClient } from "./eth/clients";
 import { jest } from "@jest/globals";
 import { assert } from "console";

@@ -1,6 +1,6 @@
 # Documentation
 
-@farcaster/hub-nodejs has five major components:
+@dimensiondev/hub-nodejs has five major components:
 
 - A grpc [Client](./Client.md), which can send and receive messages from a Farcaster Hub.  
 - [Messages](./Messages.md), which are the atomic units of change on the Farcaster network.

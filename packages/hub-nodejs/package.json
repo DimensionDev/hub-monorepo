@@ -1,5 +1,5 @@
 {
-  "name": "@farcaster/hub-nodejs",
+  "name": "@dimensiondev/hub-nodejs",
   "version": "0.18.0",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -17,11 +17,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farcasterxyz/hub-monorepo.git",
+    "url": "https://github.com/DimensionDev/hub-monorepo.git",
     "directory": "packages/hub-nodejs"
   },
   "dependencies": {
-    "@farcaster/core": "0.21.0",
+    "@dimensiondev/core": "0.21.0",
     "@grpc/grpc-js": "~1.13.7",
     "@noble/hashes": "^1.3.0",
     "neverthrow": "^6.0.0"
@@ -42,6 +42,6 @@
     "ts-proto": "1.181.2"
   },
   "publishConfig": {
-    "access": "public"
+    "registry": "https://npm.pkg.github.com"
   }
 }

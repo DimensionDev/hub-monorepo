@@ -1,5 +1,5 @@
 {
-  "name": "@farcaster/core",
+  "name": "@dimensiondev/core",
   "version": "0.21.0",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -17,7 +17,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farcasterxyz/hub-monorepo.git",
+    "url": "https://github.com/DimensionDev/hub-monorepo.git",
     "directory": "packages/core"
   },
   "dependencies": {
@@ -27,6 +27,9 @@
     "neverthrow": "^6.0.0",
     "@faker-js/faker": "^7.6.0",
     "viem": "^2.17.4"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
     "build": "tsup --config tsup.config.ts",

@@ -12,10 +12,11 @@ The repository is a monorepo with a primary application in the `/apps/` folder t
 
 ### Packages
 
-| Package Name                                  | Description                                                                    |
-| --------------------------------------------- | ------------------------------------------------------------------------------ |
-| [@farcaster/shuttle](./packages/shuttle)       | A package that streams Hubble events to Postgres |
-| [@farcaster/hub-nodejs](./packages/hub-nodejs) | A Node.js client library for Hubble |
-| [@farcaster/hub-web](./packages/hub-web)       | A Browser client library for Hubble |
-| [@farcaster/core](./packages/core)             | Shared code between all packages |
+| Package Name                                      | Description                                        |
+| ------------------------------------------------- | -------------------------------------------------- |
+| [@dimensiondev/shuttle](./packages/shuttle)       | A package that streams Hubble events to Postgres   |
+| [@dimensiondev/hub-nodejs](./packages/hub-nodejs) | A Node.js client library for Hubble                |
+| [@dimensiondev/hub-web](./packages/hub-web)       | A Browser client library for Hubble                |
+| [@dimensiondev/core](./packages/core)             | Shared code between all packages                   |
 
+Packages are published to the [GitHub Packages npm registry](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry) under the `@dimensiondev` scope.

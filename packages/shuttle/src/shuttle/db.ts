@@ -29,7 +29,7 @@ import {
   TierType,
   UserDataType,
   UserNameType,
-} from "@farcaster/hub-nodejs";
+} from "@dimensiondev/hub-nodejs";
 import { DrainOuterGeneric, SimplifySingleResult } from "kysely/dist/cjs/util/type-utils.js";
 
 import Cursor from "pg-cursor";

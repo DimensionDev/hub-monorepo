@@ -1,4 +1,4 @@
-import { Message, MessageType, isLinkCompactStateMessage, validations } from "@farcaster/hub-nodejs";
+import { Message, MessageType, isLinkCompactStateMessage, validations } from "@dimensiondev/hub-nodejs";
 import { DB, InsertableMessageRow, HubTables } from "./db";
 import { bytesToHex, convertProtobufMessageBodyToJson, farcasterTimeToDate } from "../utils";
 import { pino } from "pino";
