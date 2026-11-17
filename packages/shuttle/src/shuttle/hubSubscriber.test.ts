@@ -107,6 +107,7 @@ describe("EventStreamHubSubscriber batch flush", () => {
       calls += 1;
       if (calls === 2) throw new Error("redis down");
       added.push(Array.isArray(data) ? data : [data]);
+      return "1-0";
     };
 
     await subscriber.processHubEvent(hubEvent(1));
@@ -138,6 +139,7 @@ describe("EventStreamHubSubscriber batch flush", () => {
         markSecondAddStarted();
         await secondAddBlocked;
       }
+      return "1-0";
     };
 
     await subscriber.processHubEvent(hubEvent(1));

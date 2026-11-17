@@ -24,3 +24,18 @@ export const STATSD_METRICS_PREFIX = process.env["STATSD_METRICS_PREFIX"] || "sh
 export const CONCURRENCY = parseInt(process.env["CONCURRENCY"] || "2");
 export const USE_STREAMING_RPCS_FOR_BACKFILL = process.env["USE_STREAMING_RPCS_FOR_BACKFILL"] === "true" ? true : false;
 export const SUBSCRIBE_RPC_TIMEOUT = parseInt(process.env["SUBSCRIBE_RPC_TIMEOUT"] || "30000");
+
+// Deliveries (first read + reclaims) before a stream event is moved to `<streamKey>:dlq`
+const parsedMaxDeliveries = parseInt(process.env["STREAM_MAX_DELIVERIES"] || "5");
+export const STREAM_MAX_DELIVERIES =
+  Number.isFinite(parsedMaxDeliveries) && parsedMaxDeliveries > 0 ? parsedMaxDeliveries : 5;
+
+// Backfill only what registered projections need: reconcile only their message families and
+// skip (do not store) messages no projection cares about. Off by default (full raw backfill).
+export const BACKFILL_PROJECTIONS_ONLY = process.env["BACKFILL_PROJECTIONS_ONLY"] === "true";
+
+// `rebuild` command: comma-separated projection names (default: all registered projections).
+export const REBUILD_PROJECTIONS = (process.env["REBUILD_PROJECTIONS"] || "")
+  .split(",")
+  .map((name) => name.trim())
+  .filter(Boolean);

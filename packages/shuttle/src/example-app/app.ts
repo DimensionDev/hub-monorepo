@@ -12,25 +12,9 @@ import {
   HubEventStreamConsumer,
   HubSubscriber,
   MessageState,
-  OnChainEventBodyJson,
 } from "../index"; // If you want to use this as a standalone app, replace this import with "@dimensiondev/shuttle"
-import { AppDb, migrateToLatest, Tables } from "./db";
-import {
-  bytesToHexString,
-  getStorageUnitExpiry,
-  getStorageUnitType,
-  HubEvent,
-  GetInfoRequest,
-  isCastAddMessage,
-  isCastRemoveMessage,
-  isIdRegisterOnChainEvent,
-  isMergeOnChainHubEvent,
-  isSignerMigratedOnChainEvent,
-  isSignerOnChainEvent,
-  isStorageRentOnChainEvent,
-  isTierPurchaseOnChainEvent,
-  Message,
-} from "@dimensiondev/hub-nodejs";
+import { AppDb, migrateToLatest, pendingMigrations } from "./db";
+import { bytesToHexString, HubEvent, GetInfoRequest, Message } from "@dimensiondev/hub-nodejs";
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
 import { readFileSync } from "fs";
@@ -47,15 +31,32 @@ import {
   TOTAL_SHARDS,
   USE_STREAMING_RPCS_FOR_BACKFILL,
   SUBSCRIBE_RPC_TIMEOUT,
+  STREAM_MAX_DELIVERIES,
+  BACKFILL_PROJECTIONS_ONLY,
+  REBUILD_PROJECTIONS,
 } from "./env";
 import * as process from "node:process";
 import url from "node:url";
 import { ok, Result } from "neverthrow";
-import { getQueue, getWorker } from "./worker";
+import { enqueueBackfill, getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { bytesToHex, farcasterTimeToDate } from "../utils";
+import { backfillFidForProjections, ProjectionDispatcher, projections } from "./projections";
+import { runRebuild } from "./projections/runs";
+import { storeOnChainEvent } from "./raw/onchainEvents";
 
 const hubId = "shuttle";
+
+// Keyed by schema; App methods are also invoked with a bare `this` in tests (schema undefined).
+const dispatchers = new Map<string, ProjectionDispatcher>();
+function dispatcherFor(schema: string | undefined): ProjectionDispatcher {
+  const key = schema ?? "public";
+  let dispatcher = dispatchers.get(key);
+  if (!dispatcher) {
+    dispatcher = new ProjectionDispatcher(projections, key);
+    dispatchers.set(key, dispatcher);
+  }
+  return dispatcher;
+}
 
 export class App implements MessageHandler {
   private readonly db: DB;
@@ -106,81 +107,26 @@ export class App implements MessageHandler {
       undefined,
       SUBSCRIBE_RPC_TIMEOUT,
     );
-    const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey);
+    const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey, {
+      maxDeliveries: STREAM_MAX_DELIVERIES,
+    });
 
     return new App(db, dbSchema, redis, hubSubscriber, streamConsumer);
   }
 
+  get appDb(): AppDb {
+    return this.db as unknown as AppDb;
+  }
+
   async onHubEvent(event: HubEvent, txn: DB): Promise<boolean> {
-    if (isMergeOnChainHubEvent(event)) {
-      const onChainEvent = event.mergeOnChainEventBody.onChainEvent;
-      let body: OnChainEventBodyJson | undefined;
-      if (isIdRegisterOnChainEvent(onChainEvent)) {
-        body = {
-          eventType: onChainEvent.idRegisterEventBody.eventType,
-          from: bytesToHex(onChainEvent.idRegisterEventBody.from),
-          to: bytesToHex(onChainEvent.idRegisterEventBody.to),
-          recoveryAddress: bytesToHex(onChainEvent.idRegisterEventBody.recoveryAddress),
-        };
-      } else if (isSignerOnChainEvent(onChainEvent)) {
-        body = {
-          eventType: onChainEvent.signerEventBody.eventType,
-          key: bytesToHex(onChainEvent.signerEventBody.key),
-          keyType: onChainEvent.signerEventBody.keyType,
-          metadata: bytesToHex(onChainEvent.signerEventBody.metadata),
-          metadataType: onChainEvent.signerEventBody.metadataType,
-        };
-      } else if (isStorageRentOnChainEvent(onChainEvent)) {
-        // `getStorageUnitType` here is a misnomer for the materialized "expiry units"
-        // bucket; we keep using it for parity with the existing example, but the
-        // canonical body shape is `{ payer, units, expiry }` from the protobuf body.
-        body = {
-          payer: bytesToHex(onChainEvent.storageRentEventBody.payer),
-          units: onChainEvent.storageRentEventBody.units,
-          expiry: getStorageUnitExpiry(onChainEvent),
-        };
-        // `getStorageUnitType` is referenced here purely so the import is still used by
-        // downstream forks that rely on it; it intentionally isn't persisted.
-        void getStorageUnitType(onChainEvent);
-      } else if (isSignerMigratedOnChainEvent(onChainEvent)) {
-        body = { migratedAt: onChainEvent.signerMigratedEventBody.migratedAt };
-      } else if (isTierPurchaseOnChainEvent(onChainEvent)) {
-        // `payer` is `Uint8Array` on the protobuf and would JSON-serialize as a
-        // numeric-index object in a Postgres `json` column; convert to the hex shape
-        // that matches every other on-chain event body persisted here.
-        body = {
-          tierType: onChainEvent.tierPurchaseEventBody.tierType,
-          forDays: onChainEvent.tierPurchaseEventBody.forDays,
-          payer: bytesToHex(onChainEvent.tierPurchaseEventBody.payer),
-        };
-      }
-      if (body !== undefined) {
-        try {
-          await (txn as unknown as AppDb)
-            .insertInto("onchain_events")
-            .values({
-              chainId: onChainEvent.chainId,
-              fid: onChainEvent.fid,
-              blockTimestamp: new Date(onChainEvent.blockTimestamp * 1000),
-              blockNumber: onChainEvent.blockNumber,
-              logIndex: onChainEvent.logIndex,
-              txHash: onChainEvent.transactionHash,
-              type: onChainEvent.type,
-              body,
-            })
-            .execute();
-          log.info(`Recorded OnchainEvent ${onChainEvent.type} for fid  ${onChainEvent.fid}`);
-        } catch (e) {
-          log.error("Failed to insert onchain event", e);
-        }
-      }
-    }
+    if (await dispatcherFor(this.dbSchema).processEvent(event, txn)) return true;
+    await storeOnChainEvent(event, txn);
     return false;
   }
 
   async handleMessageMerge(
     message: Message,
-    txn: DB,
+    _txn: DB,
     operation: StoreMessageOperation,
     state: MessageState,
     isNew: boolean,
@@ -189,31 +135,6 @@ export class App implements MessageHandler {
     if (!isNew) {
       // Message was already in the db, no-op
       return;
-    }
-
-    const appDB = txn as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
-
-    // Example of how to materialize casts into a separate table. Insert casts into a separate table, and mark them as deleted when removed
-    // Note that since we're relying on "state", this can sometimes be invoked twice. e.g. when a CastRemove is merged, this call will be invoked 2 twice:
-    // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
-    // castRemove, operation=merge, state=deleted (the actual remove message)
-    const isCastMessage = isCastAddMessage(message) || isCastRemoveMessage(message);
-    if (isCastMessage && state === "created") {
-      await appDB
-        .insertInto("casts")
-        .values({
-          fid: message.data.fid,
-          hash: message.hash,
-          text: message.data.castAddBody?.text || "",
-          timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-        })
-        .execute();
-    } else if (isCastMessage && state === "deleted") {
-      await appDB
-        .updateTable("casts")
-        .set({ deletedAt: farcasterTimeToDate(message.data.timestamp) || new Date() })
-        .where("hash", "=", message.hash)
-        .execute();
     }
 
     const messageDesc = wasMissed ? `missed message (${operation})` : `message (${operation})`;
@@ -237,7 +158,7 @@ export class App implements MessageHandler {
     });
   }
 
-  async reconcileFids(fids: number[]) {
+  async reconcileFids(fids: number[], projectionsOnly = BACKFILL_PROJECTIONS_ONLY) {
     const reconciler = new MessageReconciliation(
       // biome-ignore lint/style/noNonNullAssertion: client is always initialized
       this.hubSubscriber.hubClient!,
@@ -245,12 +166,27 @@ export class App implements MessageHandler {
       log,
       undefined,
     );
+    if (projectionsOnly) {
+      const dispatcher = dispatcherFor(this.dbSchema);
+      for (const fid of fids) {
+        const { missing, projected } = await backfillFidForProjections(
+          reconciler,
+          this.db,
+          dispatcher,
+          projections,
+          fid,
+        );
+        if (projected > 0) log.info({ fid, missing, projected }, "Backfilled projected messages");
+      }
+      return;
+    }
     for (const fid of fids) {
       await reconciler.reconcileMessagesForFid(
         fid,
         async (message, missingInDb, prunedInDb, revokedInDb) => {
           if (missingInDb) {
-            await HubEventProcessor.handleMissingMessage(this.db, message, this);
+            const projected = await dispatcherFor(this.dbSchema).processMissingMessage(this.db, message);
+            if (!projected) await HubEventProcessor.handleMissingMessage(this.db, message, this);
           } else if (prunedInDb || revokedInDb) {
             const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
             log.info(`Reconciled ${messageDesc} message ${bytesToHexString(message.hash)._unsafeUnwrap()}`);
@@ -266,9 +202,9 @@ export class App implements MessageHandler {
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
-    const startedAt = Date.now();
+    let maxFid: number | undefined;
     if (fids.length === 0) {
-      let maxFid = MAX_FID ? parseInt(MAX_FID) : undefined;
+      maxFid = MAX_FID ? parseInt(MAX_FID) : undefined;
       if (!maxFid) {
         const getInfoResult = await this.hubSubscriber.hubClient?.getInfo(GetInfoRequest.create({}));
         if (getInfoResult?.isErr()) {
@@ -283,18 +219,15 @@ export class App implements MessageHandler {
         }
       }
       log.info(`Queuing up fids upto: ${maxFid}`);
-      // create an array of arrays in batches of 100 upto maxFid
-      const batchSize = 10;
-      const fids = Array.from({ length: Math.ceil(maxFid / batchSize) }, (_, i) => i * batchSize).map((fid) => fid + 1);
-      for (const start of fids) {
-        const subset = Array.from({ length: batchSize }, (_, i) => start + i);
-        await backfillQueue.add("reconcile", { fids: subset });
-      }
-    } else {
-      await backfillQueue.add("reconcile", { fids });
     }
-    await backfillQueue.add("completionMarker", { startedAt });
-    log.info("Backfill jobs queued");
+    const { runId, jobs } = await enqueueBackfill(this.db as unknown as AppDb, backfillQueue, {
+      fids,
+      maxFid,
+      projectionsOnly: BACKFILL_PROJECTIONS_ONLY,
+      projections: BACKFILL_PROJECTIONS_ONLY ? projections.map((p) => p.name) : [],
+      trigger: "cli",
+    });
+    log.info({ runId, jobs }, "Backfill jobs queued");
   }
 
   private async processHubEvent(hubEvent: HubEvent) {
@@ -319,14 +252,14 @@ export class App implements MessageHandler {
 //If the module is being run directly, start the shuttle
 if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString())) {
   async function start() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Creating shuttle app");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     log.info("Starting shuttle");
     await app.start();
   }
 
   async function backfill() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Creating shuttle app");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
     log.info(`Backfilling fids: ${fids}`);
@@ -340,10 +273,39 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   }
 
   async function worker() {
-    log.info(`Starting worker connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Starting worker");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
     await worker.run();
+  }
+
+  async function rebuild() {
+    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
+    log.info(
+      { schema: POSTGRES_SCHEMA, projections: REBUILD_PROJECTIONS, fids },
+      "Rebuilding projections from raw tables",
+    );
+    const db = getDbClient(POSTGRES_URL, POSTGRES_SCHEMA);
+    try {
+      // Rebuild never migrates: the shards own migrations, deploy them first.
+      const pending = await pendingMigrations(db, POSTGRES_SCHEMA, log);
+      if (pending.length) throw new Error(`Pending migrations ${pending.join(", ")}; deploy the shards first`);
+      const startedAt = Date.now();
+      const { runId, rebuilt, failed } = await runRebuild(db, dispatcherFor(POSTGRES_SCHEMA), {
+        projections: REBUILD_PROJECTIONS,
+        fids,
+        trigger: "cli",
+        onStarted: (id) => log.info({ runId: id }, "Rebuild run started"),
+        onFid: (projection, fid, count) => {
+          if (count % 1000 === 0) log.info({ projection, fid, count }, "Rebuild progress");
+        },
+      });
+      for (const failure of failed) log.error(failure, "Rebuild failed for fid");
+      log.info({ runId, rebuilt, failed: failed.length, seconds: (Date.now() - startedAt) / 1000 }, "Rebuild finished");
+      if (failed.length) globalThis.process.exitCode = 1;
+    } finally {
+      await db.destroy();
+    }
   }
 
   // for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
@@ -367,6 +329,10 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   program.command("start").description("Starts the shuttle").action(start);
   program.command("backfill").description("Queue up backfill for the worker").action(backfill);
   program.command("worker").description("Starts the backfill worker").action(worker);
+  program
+    .command("rebuild")
+    .description("Rebuild projections from raw rows already in the DB (REBUILD_PROJECTIONS, FIDS)")
+    .action(rebuild);
 
   program.parse(process.argv);
 }

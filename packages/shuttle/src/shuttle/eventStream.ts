@@ -178,6 +178,69 @@ export class EventStreamConnection {
   }
 
   /**
+   * Returns the delivery count of each of the given pending entries (per `XPENDING`).
+   * Ids that are no longer pending are absent from the returned map.
+   */
+  async deliveryCounts(key: string, consumerGroup: string, ids: string[]) {
+    const counts = new Map<string, number>();
+    if (ids.length === 0) return counts;
+
+    const pipeline = this.client.pipeline();
+    for (const id of ids) {
+      pipeline.xpending(key, consumerGroup, id, id, 1);
+    }
+    const results = (await pipeline.exec()) ?? [];
+    for (const [err, reply] of results) {
+      if (err) throw err;
+      for (const [id, , , deliveryCount] of (reply ?? []) as [string, string, number, number][]) {
+        counts.set(id, Number(deliveryCount));
+      }
+    }
+    return counts;
+  }
+
+  /**
+   * Returns the summary form of `XPENDING`: the number of pending entries and the
+   * oldest pending id (null when nothing is pending).
+   */
+  async pendingSummary(key: string, consumerGroup: string) {
+    const [count, minId] = (await this.client.xpending(key, consumerGroup)) as [
+      number,
+      string | null,
+      unknown,
+      unknown,
+    ];
+    return { count: Number(count), oldestId: minId ?? null };
+  }
+
+  /**
+   * Returns the group's `last-delivered-id` (entries after it were never read by the group),
+   * or null if the group doesn't exist.
+   */
+  async lastDeliveredId(key: string, consumerGroup: string) {
+    const groups = (await this.client.xinfo("GROUPS", key)) as unknown[][];
+    for (const group of groups) {
+      const fields = new Map<string, unknown>();
+      for (let i = 0; i + 1 < group.length; i += 2) fields.set(String(group[i]), group[i + 1]);
+      if (String(fields.get("name")) === consumerGroup) {
+        const id = fields.get("last-delivered-id");
+        return id === undefined || id === null ? null : String(id);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Moves an entry to the dead-letter stream `dlqKey` and acks the original.
+   *
+   * Two separate calls (no MULTI) since the DLQ key may live in a different cluster slot.
+   */
+  async deadLetter(key: string, dlqKey: string, consumerGroup: string, id: string, data: Buffer, error: string) {
+    await this.client.xadd(dlqKey, "*", "d", data, "err", error, "id", id);
+    await this.client.xack(key, consumerGroup, id);
+  }
+
+  /**
    * Gets the number of entries in the stream.
    *
    * Note that this number doesn't decrement when events are consumed/acked.
@@ -195,13 +258,14 @@ export class EventStreamConnection {
   }
 
   /**
-   * Trims items from the stream older than the given timestamp.
+   * Trims items from the stream older than the given timestamp or stream id
+   * (entries with an id lower than `minId` are removed).
    *
-   * Does an approximate trim to reduce effort by Redis.
+   * Does an approximate trim to reduce effort by Redis (it never trims more than requested).
    */
-  async trim(key: string, timestamp: Date) {
+  async trim(key: string, minId: Date | string) {
     try {
-      return await this.client.xtrim(key, "MINID", "~", timestamp.getTime());
+      return await this.client.xtrim(key, "MINID", "~", minId instanceof Date ? minId.getTime() : minId);
     } catch (e) {
       // Swallow errors caused by the underlying connection being closed (e.g. during
       // pod shutdown). `trim` is a periodic best-effort cleanup; the next invocation
@@ -217,6 +281,26 @@ const MAX_EVENTS_PER_FETCH = 10;
 const MESSAGE_PROCESSING_CONCURRENCY = 10;
 const EVENT_PROCESSING_TIMEOUT = 10_000; // How long before retrying processing (millis)
 const EVENT_DELETION_THRESHOLD = 1000 * 60 * 60 * 24; // 1 day
+const MAX_DELIVERIES = 5; // Deliveries before an event is moved to the dead-letter stream
+
+const parseStreamId = (id: string): [bigint, bigint] => {
+  const [ms, seq] = id.split("-");
+  return [BigInt(ms ?? "0"), BigInt(seq ?? "0")];
+};
+
+/** Compares two Redis stream ids ("<ms>-<seq>"). */
+export const compareStreamIds = (a: string, b: string) => {
+  const [aMs, aSeq] = parseStreamId(a);
+  const [bMs, bSeq] = parseStreamId(b);
+  if (aMs !== bMs) return aMs < bMs ? -1 : 1;
+  if (aSeq !== bSeq) return aSeq < bSeq ? -1 : 1;
+  return 0;
+};
+
+const errorMessage = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+const isMissingStreamOrGroupError = (e: unknown) =>
+  e instanceof ReplyError && /^(NOGROUP|ERR no such key)/.test((e as Error).message);
 
 type PreProcessHandler = (events: HubEvent[], eventsBytes: Uint8Array[]) => Promise<ProcessResult[]>;
 type PostProcessHandler = (events: HubEvent[], eventsBytes: Uint8Array[]) => Promise<void>;
@@ -227,6 +311,8 @@ export type EventStreamConsumerOptions = {
   groupName?: string;
   eventProcessingTimeout?: number;
   eventDeletionThreshold?: number;
+  /** Max deliveries (first read + reclaims) before an event is moved to `<streamKey>:dlq`. Default 5. */
+  maxDeliveries?: number;
   beforeProcess?: PreProcessHandler;
   afterProcess?: PostProcessHandler;
 };
@@ -389,6 +475,8 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
   public readonly messageProcessingConcurrency: number;
   public readonly eventProcessingTimeout: number;
   public readonly eventDeletionThreshold: number;
+  public readonly maxDeliveries: number;
+  public readonly deadLetterKey: string;
   public stopped = true;
   public readonly groupName: string;
   private log: pino.Logger;
@@ -396,6 +484,8 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
   private afterProcess?: PostProcessHandler;
   private interval?: NodeJS.Timeout;
   private monitor?: EventStreamMonitor;
+  // Last processing error per stream id, used to annotate dead-lettered entries
+  private lastErrors = new Map<string, string>();
 
   constructor(
     hub: HubClient,
@@ -414,6 +504,8 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
     this.messageProcessingConcurrency = options.messageProcessingConcurrency || MESSAGE_PROCESSING_CONCURRENCY;
     this.eventProcessingTimeout = options.eventProcessingTimeout || EVENT_PROCESSING_TIMEOUT;
     this.eventDeletionThreshold = options.eventDeletionThreshold || EVENT_DELETION_THRESHOLD;
+    this.maxDeliveries = options.maxDeliveries || MAX_DELIVERIES;
+    this.deadLetterKey = `${this.streamKey}:dlq`;
     this.shardKey = shardKey;
     this.log = logger;
     this.beforeProcess = options.beforeProcess;
@@ -531,6 +623,7 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
                     });
                   }
                 } catch (e: unknown) {
+                  this.lastErrors.set(streamId, errorMessage(e));
                   statsd.increment("hub.event.stream.errors", { hub: this.hub.host, source: this.shardKey });
                   this.log.error(e); // Report and move on to next event
                 }
@@ -541,6 +634,7 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
           if (eventIdsProcessed.length) {
             const startTime = Date.now();
             await this.stream.ack(this.streamKey, this.groupName, eventIdsProcessed);
+            for (const id of eventIdsProcessed) this.lastErrors.delete(id);
             statsd.timing("hub.event.stream.ack_time", Date.now() - startTime, {
               hub: this.hub.host,
               source: this.shardKey,
@@ -578,7 +672,7 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
     let totalStaleProcessed = 0;
 
     const startTime = Date.now();
-    const events = await this.stream.claimStale(
+    const claimed = await this.stream.claimStale(
       this.streamKey,
       this.groupName,
       this.eventProcessingTimeout,
@@ -592,6 +686,8 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
       hub: this.hub.host,
       source: this.shardKey,
     });
+
+    const events = await this.deadLetterExhausted(claimed);
 
     await inBatchesOf(events, this.messageProcessingConcurrency, async (batchedEvents) => {
       const eventIdsProcessed: string[] = [];
@@ -635,6 +731,7 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
                 whenReceived,
               });
             } catch (e: unknown) {
+              this.lastErrors.set(streamEvent.id, errorMessage(e));
               statsd.increment("hub.event.stream.errors", { hub: this.hub.host, source: this.shardKey });
               this.log.error(e, "Error processing stale event"); // Report and move on to next event
             }
@@ -647,6 +744,7 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
         totalStaleProcessed += eventIdsProcessed.length;
         const startTime = Date.now();
         await this.stream.ack(this.streamKey, this.groupName, eventIdsProcessed);
+        for (const id of eventIdsProcessed) this.lastErrors.delete(id);
         statsd.timing("hub.event.stream.ack_time", Date.now() - startTime, {
           hub: this.hub.host,
           source: this.shardKey,
@@ -668,11 +766,79 @@ export class HubEventStreamConsumer extends TypedEmitter<HubEventStreamConsumerE
     return totalStaleProcessed;
   }
 
+  /**
+   * Moves reclaimed entries that have exceeded `maxDeliveries` to the dead-letter stream
+   * (and acks them), returning the entries that should still be processed.
+   *
+   * `XAUTOCLAIM` increments the delivery count, so a count above `maxDeliveries` means the
+   * handler already ran `maxDeliveries` times without the entry being acked.
+   */
+  private async deadLetterExhausted(entries: { id: string; data: Buffer }[]) {
+    if (entries.length === 0) return entries;
+
+    const counts = await this.stream.deliveryCounts(
+      this.streamKey,
+      this.groupName,
+      entries.map(({ id }) => id),
+    );
+
+    const remaining: { id: string; data: Buffer }[] = [];
+    for (const entry of entries) {
+      const deliveryCount = counts.get(entry.id);
+      if (deliveryCount === undefined || deliveryCount <= this.maxDeliveries) {
+        remaining.push(entry);
+        continue;
+      }
+
+      const lastError = this.lastErrors.get(entry.id) ?? "";
+      await this.stream.deadLetter(this.streamKey, this.deadLetterKey, this.groupName, entry.id, entry.data, lastError);
+      this.lastErrors.delete(entry.id);
+      statsd.increment("hub.event.stream.dead_lettered", 1, { hub: this.hub.host, source: this.shardKey });
+      this.log.error(
+        {
+          streamKey: this.streamKey,
+          deadLetterKey: this.deadLetterKey,
+          streamId: entry.id,
+          deliveryCount,
+          maxDeliveries: this.maxDeliveries,
+          lastError,
+        },
+        "Event exceeded max deliveries, moved to dead-letter stream",
+      );
+    }
+    return remaining;
+  }
+
+  /**
+   * Computes the MINID for trimming: `now - eventDeletionThreshold`, lowered so that no
+   * pending (delivered but unacked) or never-delivered entry is removed.
+   *
+   * Returns null if the pending state couldn't be determined, in which case we skip trimming.
+   */
+  private async trimMinId(deleteThresholdTimestamp: Date): Promise<string | null> {
+    let minId = `${deleteThresholdTimestamp.getTime()}-0`;
+    try {
+      const { oldestId } = await this.stream.pendingSummary(this.streamKey, this.groupName);
+      if (oldestId && compareStreamIds(oldestId, minId) < 0) minId = oldestId;
+
+      // Entries after last-delivered-id haven't been read by the group yet (consumer lag)
+      const lastDeliveredId = await this.stream.lastDeliveredId(this.streamKey, this.groupName);
+      if (lastDeliveredId && compareStreamIds(lastDeliveredId, minId) < 0) minId = lastDeliveredId;
+    } catch (e: unknown) {
+      if (isMissingStreamOrGroupError(e)) return minId; // Nothing pending
+      this.log.warn(e, "Unable to determine pending events, skipping stream trim");
+      return null;
+    }
+    return minId;
+  }
+
   public async clearOldEvents() {
     const deleteThresholdTimestamp = new Date(Date.now() - this.eventDeletionThreshold);
 
     const startTime = Date.now();
-    const eventsCleared = await this.stream.trim(this.streamKey, deleteThresholdTimestamp);
+    const minId = await this.trimMinId(deleteThresholdTimestamp);
+    if (minId === null) return 0;
+    const eventsCleared = await this.stream.trim(this.streamKey, minId);
     statsd.timing("hub.event.stream.trim_time", Date.now() - startTime, {
       hub: this.hub.host,
       source: this.shardKey,

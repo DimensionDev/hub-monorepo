@@ -1,24 +1,37 @@
-import { ColumnType, FileMigrationProvider, Generated, GeneratedAlways, Kysely, MigrationInfo, Migrator } from "kysely";
+import { ColumnType, Kysely, Migrator } from "kysely";
 import { Logger } from "./log";
 import { err, ok, Result } from "neverthrow";
-import path from "path";
-import { promises as fs } from "fs";
-import { fileURLToPath } from "node:url";
-import { Fid, HubTables } from "../shuttle";
+import { HubTables } from "../shuttle";
+import * as messages from "./migrations/001_initial_migration";
+import * as onchainEvents from "./migrations/003_onchain_events";
+import * as blocks from "./migrations/005_blocks";
+import * as projectionFramework from "./migrations/006_projection_framework";
+import * as projectionRuns from "./migrations/007_projection_runs";
 
 const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logger) => {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const migrator = new Migrator({
     db,
     migrationTableSchema: dbSchema,
-    provider: new FileMigrationProvider({
-      fs,
-      path,
-      migrationFolder: path.join(currentDir, "migrations"),
-    }),
+    provider: {
+      async getMigrations() {
+        return {
+          "001_initial_migration": messages,
+          "003_onchain_events": onchainEvents,
+          "005_blocks": { up: (db) => blocks.up(db, dbSchema) },
+          "006_projection_framework": { up: (db) => projectionFramework.up(db, dbSchema) },
+          "007_projection_runs": { up: (db) => projectionRuns.up(db, dbSchema) },
+        };
+      },
+    },
   });
 
   return migrator;
+};
+
+/** Names of registered migrations not yet applied (commands that must not migrate check this). */
+export const pendingMigrations = async (db: Kysely<HubTables>, dbSchema: string, log: Logger): Promise<string[]> => {
+  const migrator = await createMigrator(db, dbSchema, log);
+  return (await migrator.getMigrations()).filter((m) => !m.executedAt).map((m) => m.name);
 };
 
 export const migrateToLatest = async (
@@ -48,19 +61,50 @@ export const migrateToLatest = async (
   return ok(undefined);
 };
 
-export type CastRow = {
-  id: Generated<string>;
-  createdAt: Generated<Date>;
-  updatedAt: Generated<Date>;
-  deletedAt: Date | null;
-  timestamp: Date;
-  fid: Fid;
-  hash: Uint8Array;
-  text: string;
-};
-
-export interface Tables extends HubTables {
-  casts: CastRow;
+export interface AppTables extends HubTables {
+  blocks: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    timestamp: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    blockerFid: number;
+    blockedFid: number;
+  };
+  shuttleMessageState: {
+    fid: number;
+    hash: Uint8Array;
+    shardIndex: number | null;
+    eventId: number | null;
+    operation: string;
+    eventTimestamp: Date;
+  };
+  shuttleProjectionIssues: {
+    id: ColumnType<string, never, never>;
+    projection: string;
+    fid: number | null;
+    hash: Uint8Array;
+    reason: string;
+    payload: unknown;
+    createdAt: ColumnType<Date, never, never>;
+  };
+  shuttleProjectionRuns: {
+    id: ColumnType<string, never, never>;
+    kind: "rebuild" | "backfill";
+    projections: string[];
+    fids: ColumnType<string[] | null, number[] | null, number[] | null>;
+    trigger: "cli" | "dashboard";
+    status: "running" | "succeeded" | "failed";
+    total: number | null;
+    done: ColumnType<number, number | undefined, number>;
+    failedCount: ColumnType<number, number | undefined, number>;
+    lastFid: ColumnType<string | null, number | null | undefined, number | null>;
+    details: ColumnType<unknown, string | null | undefined, string | null>;
+    error: string | null;
+    startedAt: ColumnType<Date, never, never>;
+    updatedAt: ColumnType<Date, never, Date>;
+    finishedAt: ColumnType<Date | null, never, Date | null>;
+  };
 }
 
-export type AppDb = Kysely<Tables>;
+export type AppDb = Kysely<AppTables>;
