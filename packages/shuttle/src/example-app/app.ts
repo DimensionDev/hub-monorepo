@@ -52,6 +52,7 @@ import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
 import { bytesToHex } from "../utils";
+import { processBlocksEvent } from "./blocks";
 
 const hubId = "shuttle";
 
@@ -110,6 +111,9 @@ export class App implements MessageHandler {
   }
 
   async onHubEvent(event: HubEvent, txn: DB): Promise<boolean> {
+    const blocks = await processBlocksEvent(event, txn, this.dbSchema);
+    if (blocks.isErr()) throw blocks.error;
+    if (blocks.value) return true;
     if (isMergeOnChainHubEvent(event)) {
       const onChainEvent = event.mergeOnChainEventBody.onChainEvent;
       let body: OnChainEventBodyJson | undefined;

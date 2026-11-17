@@ -139,8 +139,15 @@ afterAll(async () => {
 });
 
 describe("shuttle", () => {
-  test("migrations create only raw capture tables and migration metadata", () => {
-    expect(initialTables).toEqual(["kysely_migration", "kysely_migration_lock", "messages", "onchain_events"]);
+  test("migrations create raw capture, blocks projection and migration metadata tables", () => {
+    expect(initialTables).toEqual([
+      "blocks",
+      "kysely_migration",
+      "kysely_migration_lock",
+      "messages",
+      "onchain_events",
+      "shuttle_block_message_state",
+    ]);
   });
 
   beforeEach(() => {
@@ -380,21 +387,13 @@ describe("shuttle", () => {
       }),
     );
 
-    const hashes = await db
-      .selectFrom("messages")
-      .select("hash")
-      .where((eb) =>
-        eb.and([eb("fid", "=", addMessage1.data.fid), eb("hash", "in", [removeMessage.hash, addMessage3.hash])]),
-      )
-      .execute();
-
-    // preserve order from db:
-    for (const hash of hashes.map((h) => bytesToHex(h.hash))) {
-      const message = bytesToHex(removeMessage.hash) === hash ? removeMessage : addMessage3;
+    // SELECT and UPDATE RETURNING do not guarantee the same physical row order.
+    const deletedHashes = new Set([removeMessage, addMessage3].map((message) => bytesToHex(message.hash)));
+    for (let i = 0; i < 2; i++) {
       subscriber.addMessageCallback((msg, operation, state, isNew, wasMissed) => {
         expect(operation).toEqual("delete");
         expect(state).toEqual("deleted");
-        expect(bytesToHex(msg.hash)).toEqual(bytesToHex(message.hash));
+        expect(deletedHashes.delete(bytesToHex(msg.hash))).toBe(true);
         // isNew is true because the message was updated in the db
         expect(isNew).toEqual(true);
       });
@@ -417,6 +416,7 @@ describe("shuttle", () => {
         },
       }),
     );
+    expect(deletedHashes.size).toBe(0);
 
     const addMessage1InDb = await db
       .selectFrom("messages")

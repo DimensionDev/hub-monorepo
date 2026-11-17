@@ -1,9 +1,10 @@
-import { Kysely, Migrator } from "kysely";
+import { ColumnType, Kysely, Migrator } from "kysely";
 import { Logger } from "./log";
 import { err, ok, Result } from "neverthrow";
 import { HubTables } from "../shuttle";
 import * as messages from "./migrations/001_initial_migration";
 import * as onchainEvents from "./migrations/003_onchain_events";
+import * as blocks from "./migrations/005_blocks";
 
 const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logger) => {
   const migrator = new Migrator({
@@ -11,10 +12,10 @@ const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logg
     migrationTableSchema: dbSchema,
     provider: {
       async getMigrations() {
-        // Business projections are added separately when their handlers are ready.
         return {
           "001_initial_migration": messages,
           "003_onchain_events": onchainEvents,
+          "005_blocks": { up: (db) => blocks.up(db, dbSchema) },
         };
       },
     },
@@ -50,4 +51,24 @@ export const migrateToLatest = async (
   return ok(undefined);
 };
 
-export type AppDb = Kysely<HubTables>;
+export interface AppTables extends HubTables {
+  blocks: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    timestamp: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    blockerFid: number;
+    blockedFid: number;
+  };
+  shuttleBlockMessageState: {
+    fid: number;
+    hash: Uint8Array;
+    shardIndex: number;
+    eventId: number;
+    operation: string;
+    eventTimestamp: Date;
+  };
+}
+
+export type AppDb = Kysely<AppTables>;
