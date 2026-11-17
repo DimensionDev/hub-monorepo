@@ -42,7 +42,7 @@ FROM onchain_events GROUP BY 1, 2, 3 HAVING count(*) > 1;
 2. 用库里已有的原始数据重建这个投影：
 
 ```bash
-sudo docker compose run --rm -e REBUILD_PROJECTIONS=<name> shuttle-worker yarn start rebuild
+sudo docker compose run --rm -e REBUILD_PROJECTIONS=<name> shuttle-worker pnpm start rebuild
 ```
 
    - `REBUILD_PROJECTIONS` 是逗号分隔的投影名，不设时重建全部已注册的投影；`FIDS` 可以限定范围，用于试跑。
@@ -71,8 +71,8 @@ Shuttle 直接在 `POSTGRES_URL` 指定的数据库、`POSTGRES_SCHEMA` 指定�
 cd packages/shuttle
 cp .env.dashboard.example .env.dashboard   # 填连接；不会提交（.gitignore）
 ssh -N -L 55432:127.0.0.1:5432 -L 56379:127.0.0.1:6379 <server>   # 按服务器实际端口改
-yarn dashboard                              # http://127.0.0.1:8790
-yarn dashboard --env-file <file> --addr 127.0.0.1:8791
+pnpm dashboard                              # http://127.0.0.1:8790
+pnpm dashboard --env-file <file> --addr 127.0.0.1:8791
 ```
 
 - 只允许监听本机地址，非 `127.0.0.1` / `::1` / `localhost` 直接拒绝；请求的 Host 也必须是本机名。没有鉴权。
@@ -83,7 +83,7 @@ yarn dashboard --env-file <file> --addr 127.0.0.1:8791
 
 ## 服务端
 
-没有 CI 和镜像仓库。本地 `scripts/deploy.sh` 把指定提交的 `git archive` 上传到服务器 `/opt/shuttle/releases/<sha>`，在服务器上原生构建 `shuttle:<sha>`，再切换版本。`nice` 只降低 docker 命令行客户端的优先级，真正执行构建的 dockerd 不受影响；2 核机器上首次构建会和 shard 争用 CPU，最好在低峰期部署。Dockerfile 先根据各 workspace 的 `package.json` 和 `yarn.lock` 安装依赖，再复制源码构建，所以只改代码时会复用依赖层。新增 workspace 时要同步更新 Dockerfile 里的 manifest 列表。
+没有 CI 和镜像仓库。本地 `scripts/deploy.sh` 把指定提交的 `git archive` 上传到服务器 `/opt/shuttle/releases/<sha>`，在服务器上原生构建 `shuttle:<sha>`，再切换版本。`nice` 只降低 docker 命令行客户端的优先级，真正执行构建的 dockerd 不受影响；2 核机器上首次构建会和 shard 争用 CPU，最好在低峰期部署。Dockerfile 先根据各 workspace 的 `package.json`、`pnpm-lock.yaml` 和 `pnpm-workspace.yaml` 安装依赖，再复制源码构建，所以只改代码时会复用依赖层。新增 workspace 时要同步更新 Dockerfile 里的 manifest 列表。
 
 ```bash
 scripts/deploy.sh deploy            # 部署 HEAD，工作区必须没有未提交的修改
@@ -116,7 +116,7 @@ scripts/deploy.sh rollback <sha>    # 切回服务器上仍保留的旧镜像，
 3. 先用少量 fid 试跑只补投影的 backfill。`BACKFILL_PROJECTIONS_ONLY=true` 表示只向节点拉取投影需要的消息族（blocks 对应 link 消息和 compact），没有投影关心的消息（例如 follow）不写库，每个 fid 在一个事务里只重算一次：
 
 ```bash
-sudo docker compose run --rm -e BACKFILL_PROJECTIONS_ONLY=true -e FIDS=3,2,1 shuttle-worker yarn start backfill
+sudo docker compose run --rm -e BACKFILL_PROJECTIONS_ONLY=true -e FIDS=3,2,1 shuttle-worker pnpm start backfill
 ```
 
 日志出现覆盖最后一个 fid 的 `Reconciled N upto <fid>` 后按 Ctrl-C 停止（worker 不会自己退出）。不要以 `Reconciliation started at ... complete at ...` 为准：worker 并发执行任务，这条完成标记可能在 reconcile 任务真正跑完之前就打印。有 block 的 fid 会打出 `Backfilled projected messages`。然后查结果：
@@ -142,10 +142,10 @@ python3 scripts/dev-tunnel.py
 node --env-file=.env.development scripts/dev-check.mjs
 
 # 重新安装依赖
-npm exec --yes --package=yarn@1.22.19 -- yarn install --frozen-lockfile
+pnpm install --frozen-lockfile
 
 # 按依赖顺序构建
-npm exec --yes --package=yarn@1.22.19 --call 'yarn --cwd packages/core build && yarn --cwd packages/hub-nodejs build && yarn --cwd packages/shuttle build'
+pnpm --dir packages/core build && pnpm --dir packages/hub-nodejs build && pnpm --dir packages/shuttle build
 ```
 
 `.env` 保留服务端连接配置，`.env.development` 使用本机 SSH 转发端口，两者均不提交 Git。默认端口：PostgreSQL `15432`、Redis `26379`、Snapchain gRPC `23383`、HTTP `23381`。可通过 `SHUTTLE_SSH_HOST`、`SHUTTLE_SSH_IDENTITY` 覆盖 SSH 目标和私钥路径。

@@ -1,0 +1,20 @@
+packages:
+  - packages/*
+
+# Flat node_modules like yarn v1. core's DTS build type-checks viem/ox .ts sources, and with
+# pnpm's isolated layout tsc cannot name ox's @noble/curves types (TS2742).
+nodeLinker: hoisted
+
+overrides:
+  "@ethersproject/providers>ws": 8.21.0
+
+# pnpm 10 skips dependency install scripts unless listed here.
+onlyBuiltDependencies:
+  - "@biomejs/biome"
+  - "@swc/core"
+  - esbuild
+  - msgpackr-extract
+  - turbo
+
+ignoredBuiltDependencies:
+  - protobufjs

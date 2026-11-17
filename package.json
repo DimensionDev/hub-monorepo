@@ -3,21 +3,20 @@
   "description": "A monorepo for the Farcaster Hub",
   "version": "0.0.0",
   "private": true,
-  "packageManager": "yarn@1.22.19",
-  "workspaces": ["apps/*", "packages/*"],
+  "packageManager": "pnpm@10.26.1",
   "scripts": {
     "build": "./node_modules/.bin/turbo run build",
     "clean": "./node_modules/.bin/turbo run clean",
     "dev": "./node_modules/.bin/turbo run dev --parallel",
-    "protoc": "cd packages/core && yarn protoc && cd ../hub-nodejs && yarn protoc && cd ../hub-web && yarn protoc && sed -i '' 's/{ grpc }/grpcWeb/g; s/grpc\\./grpcWeb.grpc./g' src/generated/rpc.ts",
+    "protoc": "cd packages/core && pnpm protoc && cd ../hub-nodejs && pnpm protoc && cd ../hub-web && pnpm protoc && sed -i '' 's/{ grpc }/grpcWeb/g; s/grpc\\./grpcWeb.grpc./g' src/generated/rpc.ts",
     "test": "./node_modules/.bin/turbo run test",
     "test:ci": "./node_modules/.bin/turbo run test:ci -- --passWithNoTests",
     "lint": "./node_modules/.bin/turbo run lint --parallel",
     "lint:ci": "./node_modules/.bin/turbo run lint:ci --parallel",
     "prepare": "husky",
     "version-packages": "changeset version",
-    "release-packages": "yarn build && changeset publish",
-    "release-all": "yarn build && changeset publish && changeset tag"
+    "release-packages": "pnpm build && changeset publish",
+    "release-all": "pnpm build && changeset publish && changeset tag"
   },
   "engines": {
     "npm": ">=8.0.0",
@@ -25,6 +24,7 @@
   },
   "devDependencies": {
     "@changesets/changelog-git": "0.1.14",
+    "@biomejs/biome": "1.1.0",
     "@changesets/cli": "2.31.1",
     "@swc/cli": "0.1.62",
     "@swc/core": "1.3.64",
@@ -37,11 +37,8 @@
     "rimraf": "6.0.1",
     "ts-node": "10.9.1",
     "tsup": "6.6.3",
-    "turbo": "1.10.3",
+    "turbo": "1.13.4",
     "typescript": "5.4.5"
-  },
-  "resolutions": {
-    "**/@ethersproject/providers/ws": "8.21.0"
   },
   "lint-staged": {
     "*.ts": ["biome check"],

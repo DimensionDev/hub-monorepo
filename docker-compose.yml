@@ -31,11 +31,11 @@ services:
 
   # Optional reconciliation worker (backfill queue consumer). Enable with:
   #   docker compose --profile worker up -d
-  # Do NOT run `yarn start backfill` for the "only new events" requirement.
+  # Do NOT run `pnpm start backfill` for the "only new events" requirement.
   shuttle-worker:
     <<: *shuttle
     profiles: ["worker"]
     environment:
       SHARDS: "2"
       SHARD_NUM: "1"
-    command: ["yarn", "start", "worker"]
+    command: ["pnpm", "start", "worker"]
