@@ -1,4 +1,6 @@
 import { migrateToLatest } from "./example-app/db";
+import { App } from "./example-app/app";
+import { up as createUsernameFixture } from "./example-app/migrations/004_usernames";
 import { log } from "./log";
 import { sql } from "kysely";
 import {
@@ -45,6 +47,7 @@ import { bytesToHex, MESSAGE_TYPE_KEY_ADD, MESSAGE_TYPE_KEY_REMOVE } from "./uti
 let db: DB;
 let subscriber: FakeHubSubscriber;
 let redis: RedisClient;
+let initialTables: string[];
 
 const signer = Factories.Ed25519Signer.build();
 
@@ -121,6 +124,11 @@ beforeAll(async () => {
   db = getDbClient(`${POSTGRES_URL}/${dbName}`, POSTGRES_SCHEMA);
   const result = await migrateToLatest(db, POSTGRES_SCHEMA, log);
   expect(result.isOk()).toBe(true);
+  const tables = await sql<{ tableName: string }>`
+    SELECT table_name FROM information_schema.tables
+    WHERE table_schema = ${POSTGRES_SCHEMA} AND table_type = 'BASE TABLE'
+  `.execute(db);
+  initialTables = tables.rows.map((row) => row.tableName).sort();
 
   redis = RedisClient.create(REDIS_URL);
   await redis.clearForTest();
@@ -131,6 +139,10 @@ afterAll(async () => {
 });
 
 describe("shuttle", () => {
+  test("migrations create only raw capture tables and migration metadata", () => {
+    expect(initialTables).toEqual(["kysely_migration", "kysely_migration_lock", "messages", "onchain_events"]);
+  });
+
   beforeEach(() => {
     subscriber = new FakeHubSubscriber();
   });
@@ -181,7 +193,7 @@ describe("shuttle", () => {
     [MESSAGE_TYPE_KEY_ADD, "created"],
     [MESSAGE_TYPE_KEY_REMOVE, "deleted"],
   ] as const)("stores upstream key-management message type %i", async (type, expectedState) => {
-    const message = await Factories.CastAddMessage.create({}, { transient: { signer } });
+    const message: Message = await Factories.CastAddMessage.create({}, { transient: { signer } });
     if (!message.data) throw new Error("Message data is missing");
     message.data.type = type;
     message.data.castAddBody = undefined;
@@ -1049,6 +1061,25 @@ describe("shuttle", () => {
       await db.deleteFrom("onchain_events").where("fid", "=", fid).execute();
     });
 
+    test("the app records onchain events with the raw capture schema", async () => {
+      const event = makeIdRegisterEvent({ blockNumber: 7654321, logIndex: 9 });
+      await HubEventProcessor.processHubEvent(
+        db,
+        HubEvent.create({
+          id: 456,
+          type: HubEventType.MERGE_ON_CHAIN_EVENT,
+          mergeOnChainEventBody: { onChainEvent: event },
+        }),
+        { onHubEvent: App.prototype.onHubEvent, handleMessageMerge: App.prototype.handleMessageMerge },
+      );
+      const row = await db
+        .selectFrom("onchain_events")
+        .select(["fid", "blockNumber", "logIndex"])
+        .where("fid", "=", fid)
+        .executeTakeFirstOrThrow();
+      expect(row).toEqual({ fid, blockNumber: 7654321, logIndex: 9 });
+    });
+
     test("hub event present in DB by (chainId, blockNumber, logIndex) is detected as not missing", async () => {
       // Regression: pg parses int8 as JS number, so chainId / blockNumber on the row are
       // numbers; comparing the IN-list as numbers (not BigInts) must still match.
@@ -1116,6 +1147,11 @@ describe("shuttle", () => {
   });
 
   describe("UsernameProofReconciliation", () => {
+    beforeAll(async () => {
+      // This optional projection exists only in the isolated library test database.
+      await createUsernameFixture(db);
+    });
+
     const fid = 4242;
 
     function makeProof(name: string, owner: string, type: UserNameType, timestamp: number): UserNameProof {
@@ -1207,6 +1243,24 @@ describe("shuttle", () => {
   });
 
   describe("message types", () => {
+    test("the app captures cast messages without a casts projection", async () => {
+      const message = await Factories.CastAddMessage.create({}, { transient: { signer } });
+      await HubEventProcessor.processHubEvent(
+        db,
+        HubEvent.create({ id: 123, type: HubEventType.MERGE_MESSAGE, mergeMessageBody: { message } }),
+        {
+          onHubEvent: async () => false,
+          handleMessageMerge: App.prototype.handleMessageMerge,
+        },
+      );
+      const row = await db
+        .selectFrom("messages")
+        .select("hash")
+        .where("hash", "=", message.hash)
+        .executeTakeFirstOrThrow();
+      expect(Buffer.from(row.hash)).toEqual(Buffer.from(message.hash));
+    });
+
     test("handles compact link state messages", async () => {
       const message = await Factories.LinkCompactStateMessage.create(
         {

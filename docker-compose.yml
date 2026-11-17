@@ -1,9 +1,10 @@
 name: shuttle
 
 x-shuttle: &shuttle
-  # Custom DimensionDev build: handles the new Farcaster message types and has
-  # corrected hub-subscribe timeout handling (replaces local/farcaster-shuttle:1.0.3).
-  image: ghcr.io/dimensiondev/hub-monorepo/shuttle:sha-e5fbaa4
+  image: local/farcaster-shuttle:raw-capture-20261117
+  build:
+    context: .
+    dockerfile: Dockerfile
   env_file:
     - .env
   restart: unless-stopped

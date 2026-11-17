@@ -1,21 +1,23 @@
-import { ColumnType, FileMigrationProvider, Generated, GeneratedAlways, Kysely, MigrationInfo, Migrator } from "kysely";
+import { Kysely, Migrator } from "kysely";
 import { Logger } from "./log";
 import { err, ok, Result } from "neverthrow";
-import path from "path";
-import { promises as fs } from "fs";
-import { fileURLToPath } from "node:url";
-import { Fid, HubTables } from "../shuttle";
+import { HubTables } from "../shuttle";
+import * as messages from "./migrations/001_initial_migration";
+import * as onchainEvents from "./migrations/003_onchain_events";
 
 const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logger) => {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
   const migrator = new Migrator({
     db,
     migrationTableSchema: dbSchema,
-    provider: new FileMigrationProvider({
-      fs,
-      path,
-      migrationFolder: path.join(currentDir, "migrations"),
-    }),
+    provider: {
+      async getMigrations() {
+        // Business projections are added separately when their handlers are ready.
+        return {
+          "001_initial_migration": messages,
+          "003_onchain_events": onchainEvents,
+        };
+      },
+    },
   });
 
   return migrator;
@@ -48,19 +50,4 @@ export const migrateToLatest = async (
   return ok(undefined);
 };
 
-export type CastRow = {
-  id: Generated<string>;
-  createdAt: Generated<Date>;
-  updatedAt: Generated<Date>;
-  deletedAt: Date | null;
-  timestamp: Date;
-  fid: Fid;
-  hash: Uint8Array;
-  text: string;
-};
-
-export interface Tables extends HubTables {
-  casts: CastRow;
-}
-
-export type AppDb = Kysely<Tables>;
+export type AppDb = Kysely<HubTables>;

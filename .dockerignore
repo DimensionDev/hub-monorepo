@@ -27,3 +27,6 @@
 **/LICENSE
 **/npm-debug.log
 **/Dockerfile*
+
+# Private development connection files
+**/.env.*

@@ -14,15 +14,13 @@ import {
   MessageState,
   OnChainEventBodyJson,
 } from "../index"; // If you want to use this as a standalone app, replace this import with "@dimensiondev/shuttle"
-import { AppDb, migrateToLatest, Tables } from "./db";
+import { AppDb, migrateToLatest } from "./db";
 import {
   bytesToHexString,
   getStorageUnitExpiry,
   getStorageUnitType,
   HubEvent,
   GetInfoRequest,
-  isCastAddMessage,
-  isCastRemoveMessage,
   isIdRegisterOnChainEvent,
   isMergeOnChainHubEvent,
   isSignerMigratedOnChainEvent,
@@ -53,7 +51,7 @@ import url from "node:url";
 import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { bytesToHex, farcasterTimeToDate } from "../utils";
+import { bytesToHex } from "../utils";
 
 const hubId = "shuttle";
 
@@ -180,7 +178,7 @@ export class App implements MessageHandler {
 
   async handleMessageMerge(
     message: Message,
-    txn: DB,
+    _txn: DB,
     operation: StoreMessageOperation,
     state: MessageState,
     isNew: boolean,
@@ -189,31 +187,6 @@ export class App implements MessageHandler {
     if (!isNew) {
       // Message was already in the db, no-op
       return;
-    }
-
-    const appDB = txn as unknown as AppDb; // Need this to make typescript happy, not clean way to "inherit" table types
-
-    // Example of how to materialize casts into a separate table. Insert casts into a separate table, and mark them as deleted when removed
-    // Note that since we're relying on "state", this can sometimes be invoked twice. e.g. when a CastRemove is merged, this call will be invoked 2 twice:
-    // castAdd, operation=delete, state=deleted (the cast that the remove is removing)
-    // castRemove, operation=merge, state=deleted (the actual remove message)
-    const isCastMessage = isCastAddMessage(message) || isCastRemoveMessage(message);
-    if (isCastMessage && state === "created") {
-      await appDB
-        .insertInto("casts")
-        .values({
-          fid: message.data.fid,
-          hash: message.hash,
-          text: message.data.castAddBody?.text || "",
-          timestamp: farcasterTimeToDate(message.data.timestamp) || new Date(),
-        })
-        .execute();
-    } else if (isCastMessage && state === "deleted") {
-      await appDB
-        .updateTable("casts")
-        .set({ deletedAt: farcasterTimeToDate(message.data.timestamp) || new Date() })
-        .where("hash", "=", message.hash)
-        .execute();
     }
 
     const messageDesc = wasMissed ? `missed message (${operation})` : `message (${operation})`;
@@ -319,14 +292,14 @@ export class App implements MessageHandler {
 //If the module is being run directly, start the shuttle
 if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString())) {
   async function start() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Creating shuttle app");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     log.info("Starting shuttle");
     await app.start();
   }
 
   async function backfill() {
-    log.info(`Creating app connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Creating shuttle app");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
     log.info(`Backfilling fids: ${fids}`);
@@ -340,7 +313,7 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   }
 
   async function worker() {
-    log.info(`Starting worker connecting to: ${POSTGRES_URL}, ${REDIS_URL}, ${HUB_HOST}`);
+    log.info({ hub: HUB_HOST, schema: POSTGRES_SCHEMA }, "Starting worker");
     const app = App.create(POSTGRES_URL, POSTGRES_SCHEMA, REDIS_URL, HUB_HOST, TOTAL_SHARDS, SHARD_INDEX, HUB_SSL);
     const worker = getWorker(app, app.redis.client, log, CONCURRENCY);
     await worker.run();

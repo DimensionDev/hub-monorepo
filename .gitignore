@@ -49,3 +49,5 @@ dist
 .fleet
 **/.vitepress/cache/
 **/.vitepress/dist/
+# Private local development connections
+.env.development
