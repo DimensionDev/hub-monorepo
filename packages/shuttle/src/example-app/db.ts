@@ -5,6 +5,7 @@ import { HubTables } from "../shuttle";
 import * as messages from "./migrations/001_initial_migration";
 import * as onchainEvents from "./migrations/003_onchain_events";
 import * as blocks from "./migrations/005_blocks";
+import * as projectionFramework from "./migrations/006_projection_framework";
 
 const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logger) => {
   const migrator = new Migrator({
@@ -16,6 +17,7 @@ const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logg
           "001_initial_migration": messages,
           "003_onchain_events": onchainEvents,
           "005_blocks": { up: (db) => blocks.up(db, dbSchema) },
+          "006_projection_framework": { up: (db) => projectionFramework.up(db, dbSchema) },
         };
       },
     },
@@ -61,13 +63,22 @@ export interface AppTables extends HubTables {
     blockerFid: number;
     blockedFid: number;
   };
-  shuttleBlockMessageState: {
+  shuttleMessageState: {
     fid: number;
     hash: Uint8Array;
-    shardIndex: number;
-    eventId: number;
+    shardIndex: number | null;
+    eventId: number | null;
     operation: string;
     eventTimestamp: Date;
+  };
+  shuttleProjectionIssues: {
+    id: ColumnType<string, never, never>;
+    projection: string;
+    fid: number | null;
+    hash: Uint8Array;
+    reason: string;
+    payload: unknown;
+    createdAt: ColumnType<Date, never, never>;
   };
 }
 

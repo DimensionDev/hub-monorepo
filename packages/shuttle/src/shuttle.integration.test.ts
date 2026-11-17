@@ -146,7 +146,8 @@ describe("shuttle", () => {
       "kysely_migration_lock",
       "messages",
       "onchain_events",
-      "shuttle_block_message_state",
+      "shuttle_message_state",
+      "shuttle_projection_issues",
     ]);
   });
 

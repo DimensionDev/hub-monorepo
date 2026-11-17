@@ -1,40 +1,15 @@
-import { createHash } from "node:crypto";
-import {
-  FarcasterNetwork,
-  HubError,
-  HubEvent,
-  HubResult,
-  isMergeMessageHubEvent,
-  isPruneMessageHubEvent,
-  isRevokeMessageHubEvent,
-  Message,
-  MessageType,
-  extractTimestampFromEvent,
-} from "@dimensiondev/hub-nodejs";
+import { FarcasterNetwork, HubError, HubResult, Message, MessageType } from "@dimensiondev/hub-nodejs";
 import { sql } from "kysely";
-import { err, ok, Result, ResultAsync } from "neverthrow";
-import { DB, LinkBodyJson, MessageRow, StoreMessageOperation } from "../shuttle";
-import { MessageProcessor } from "../shuttle/messageProcessor";
-import { convertProtobufMessageBodyToJson, farcasterTimeToDate } from "../utils";
-import type { AppDb } from "./db";
+import { err, ok, Result } from "neverthrow";
+import { LinkBodyJson, MessageRow } from "../../shuttle";
+import { convertProtobufMessageBodyToJson, farcasterTimeToDate } from "../../utils";
+import { blockId } from "./ids";
+import type { Projection, ProjectionContext, RawChange } from "./types";
 
-type Mutation = { message: Message; operation: StoreMessageOperation };
 type BlockMessage = MessageRow & { body: LinkBodyJson };
 type Scope = { targets: Set<number>; full: boolean };
 type Decision = { active: true; timestamp: Date } | { active: false; deletedAt: Date };
-type Projection = { decisions: Map<number, Decision>; compact?: BlockMessage };
-
-function mutations(event: HubEvent): Mutation[] {
-  if (isMergeMessageHubEvent(event)) {
-    return [
-      ...event.mergeMessageBody.deletedMessages.map((message): Mutation => ({ message, operation: "delete" })),
-      { message: event.mergeMessageBody.message, operation: "merge" },
-    ];
-  }
-  if (isPruneMessageHubEvent(event)) return [{ message: event.pruneMessageBody.message, operation: "prune" }];
-  if (isRevokeMessageHubEvent(event)) return [{ message: event.revokeMessageBody.message, operation: "revoke" }];
-  return [];
-}
+type BlockState = { decisions: Map<number, Decision>; compact?: BlockMessage };
 
 function isBlock(message: Message): boolean {
   const data = message.data;
@@ -132,7 +107,7 @@ function invalidTime(message: BlockMessage): Date {
   return new Date(Math.min(...times.map((time) => time.getTime())));
 }
 
-function reduce(rows: MessageRow[]): HubResult<Projection> {
+function reduce(rows: MessageRow[]): HubResult<BlockState> {
   const messages: BlockMessage[] = [];
   for (const row of rows) {
     const parsed = parseBlockRow(row);
@@ -220,102 +195,12 @@ function reduce(rows: MessageRow[]): HubResult<Projection> {
   return ok({ decisions, compact });
 }
 
-function blockId(fid: number, target: number): string {
-  // UUID v5, DNS namespace; identical to the existing Go initializer.
-  const hash = createHash("sha1")
-    .update(Buffer.from("6ba7b8109dad11d180b400c04fd430c8", "hex"))
-    .update(`farcaster:mainnet:block:${fid}:${target}`)
-    .digest();
-  hash[6] = ((hash[6] ?? 0) & 0x0f) | 0x50;
-  hash[8] = ((hash[8] ?? 0) & 0x3f) | 0x80;
-  const hex = hash.subarray(0, 16).toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-/** Captures failures for the existing MessageHandler transaction boundary to roll back. */
-export function processBlocksEvent(event: HubEvent, txn: DB, schema = "public"): ResultAsync<boolean, HubError> {
-  return ResultAsync.fromPromise(applyBlockEvent(event, txn, schema), (error) =>
-    error instanceof HubError
-      ? error
-      : new HubError("unavailable.storage_failure", error instanceof Error ? error : String(error)),
-  );
-}
-
-/** Runs inside HubEventProcessor's transaction, before any generic message writes. */
-async function applyBlockEvent(event: HubEvent, txn: DB, schema: string): Promise<boolean> {
-  const changes = mutations(event);
-  if (!changes.some(({ message }) => isBlock(message))) return false;
-  if (
-    !Number.isSafeInteger(event.id) ||
-    event.id <= 0 ||
-    !Number.isSafeInteger(event.timestamp) ||
-    event.timestamp <= 0
-  ) {
-    throw new HubError(
-      "bad_request.validation_failure",
-      "Block events require a positive, safe event id and timestamp",
-    );
-  }
-  // Safety: App runs its additive migrations before consuming events. Kysely's
-  // transaction has the same connection and schema plugins as the raw DB type.
-  const db = txn as unknown as AppDb;
-  const fids = [...new Set(changes.map(({ message }) => message.data?.fid))].sort((a, b) => (a ?? 0) - (b ?? 0));
-  for (const fid of fids) {
-    if (!fid) throw new HubError("bad_request.validation_failure", "Missing message fid");
-    // The schema is part of the table identity, including for non-public schemas.
-    await sql`SELECT pg_advisory_xact_lock(hashtextextended(
-      ${schema} || ':shuttle:blocks:' || ${String(fid)}, 0))`.execute(db);
-  }
+/** Touched targets per blocker fid; a compact state rescans every relationship of the fid. */
+function scopes(changes: RawChange[]): Map<number, Scope> {
   const touched = new Map<number, Scope>();
-  for (const { message, operation } of changes) {
-    if (!isBlock(message)) {
-      await MessageProcessor.storeMessage(
-        message,
-        txn,
-        operation,
-        undefined,
-        process.env["SHUTTLE_VALIDATE_MESSAGES"] === "true",
-      );
-      continue;
-    }
-    const validation = validate(message);
-    if (validation.isErr()) throw validation.error;
+  for (const { message } of changes) {
     const data = message.data;
-    if (!data) throw new HubError("bad_request.validation_failure", "Missing block data");
-    const previous = await db
-      .selectFrom("shuttleBlockMessageState")
-      .selectAll()
-      .where("fid", "=", data.fid)
-      .where("hash", "=", message.hash)
-      .executeTakeFirst();
-    if (previous && previous.shardIndex !== event.shardIndex)
-      throw new HubError("bad_request.conflict", `Block shard changed for fid ${data.fid}`);
-    if (previous && previous.eventId >= event.id) continue;
-    await MessageProcessor.storeMessage(
-      message,
-      txn,
-      operation,
-      undefined,
-      process.env["SHUTTLE_VALIDATE_MESSAGES"] === "true",
-    );
-    const eventTimestamp = new Date(extractTimestampFromEvent(event));
-    if (operation !== "merge") {
-      await db
-        .updateTable("messages")
-        .set({
-          deletedAt: operation === "delete" ? eventTimestamp : null,
-          prunedAt: operation === "prune" ? eventTimestamp : null,
-          revokedAt: operation === "revoke" ? eventTimestamp : null,
-        })
-        .where("hash", "=", message.hash)
-        .execute();
-    }
-    const state = { shardIndex: event.shardIndex, eventId: event.id, operation, eventTimestamp };
-    await db
-      .insertInto("shuttleBlockMessageState")
-      .values({ fid: data.fid, hash: message.hash, ...state })
-      .onConflict((oc) => oc.columns(["fid", "hash"]).doUpdateSet(state))
-      .execute();
+    if (!data) continue;
     const scope = touched.get(data.fid) ?? { targets: new Set<number>(), full: false };
     if (data.type === MessageType.LINK_COMPACT_STATE) scope.full = true;
     for (const target of data.linkCompactStateBody?.targetFids ?? [data.linkBody?.targetFid]) {
@@ -323,7 +208,11 @@ async function applyBlockEvent(event: HubEvent, txn: DB, schema: string): Promis
     }
     touched.set(data.fid, scope);
   }
-  for (const [fid, scope] of touched) {
+  return touched;
+}
+
+async function applyBlocks({ db }: ProjectionContext, changes: RawChange[]): Promise<void> {
+  for (const [fid, scope] of scopes(changes)) {
     const messages = await db
       .selectFrom("messages")
       .selectAll()
@@ -392,5 +281,11 @@ async function applyBlockEvent(event: HubEvent, txn: DB, schema: string): Promis
       }
     }
   }
-  return true;
 }
+
+export const blocksProjection: Projection = {
+  name: "blocks",
+  interestedIn: (change) => isBlock(change.message),
+  validate: (change) => validate(change.message),
+  apply: applyBlocks,
+};

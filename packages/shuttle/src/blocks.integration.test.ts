@@ -40,7 +40,8 @@ integration("blocks incremental projection", () => {
   });
 
   beforeEach(async () => {
-    await sql`TRUNCATE public.messages, public.blocks, public.shuttle_block_message_state`.execute(db);
+    await sql`TRUNCATE public.messages, public.blocks, public.shuttle_message_state,
+      public.shuttle_projection_issues`.execute(db);
   });
 
   const processEvent = (event: HubEvent) =>
@@ -325,7 +326,7 @@ integration("blocks incremental projection", () => {
     try {
       await expect(merge(1, add)).rejects.toThrow("injected blocks failure");
       expect(await db.selectFrom("messages").select("hash").execute()).toEqual([]);
-      expect((await sql`SELECT * FROM public.shuttle_block_message_state`.execute(db)).rows).toEqual([]);
+      expect((await sql`SELECT * FROM public.shuttle_message_state`.execute(db)).rows).toEqual([]);
     } finally {
       await sql`DROP TRIGGER fail_blocks ON public.blocks`.execute(db);
       await sql`DROP FUNCTION public.fail_block_write()`.execute(db);
@@ -334,11 +335,20 @@ integration("blocks incremental projection", () => {
     expect(await rows()).toHaveLength(1);
   });
 
-  test("rejects non-mainnet or malformed block events without committing raw data", async () => {
+  test("records non-mainnet or malformed block messages as issues without storing them", async () => {
     const foreign = link(200, 1000, 1, { network: FarcasterNetwork.TESTNET });
-    await expect(merge(1, foreign)).rejects.toThrow("mainnet");
-    await expect(merge(2, link(0, 1000, 2))).rejects.toThrow("target");
+    await merge(1, foreign);
+    await merge(2, link(0, 1000, 2));
+    await merge(3, link(0, 1000, 2)); // replay records no duplicate issue
     expect(await db.selectFrom("messages").select("hash").execute()).toEqual([]);
+    expect(await rows()).toEqual([]);
+    const issues = (
+      await sql<{ projection: string; reason: string }>`SELECT projection, reason FROM public.shuttle_projection_issues
+        ORDER BY reason`.execute(db)
+    ).rows;
+    expect(issues).toHaveLength(2);
+    expect(issues.every((issue) => issue.projection === "blocks")).toBe(true);
+    expect(issues.map((issue) => issue.reason).join(" ")).toMatch(/mainnet[\s\S]*target|target[\s\S]*mainnet/);
   });
 
   test("equal-time active compact conflicts and duplicate existing relationships fail atomically", async () => {
@@ -411,8 +421,10 @@ integration("blocks incremental projection", () => {
     await merge(1, link(200, 1000, 1));
     const before = await rows();
     const reopenMigration = async () => {
-      await sql`DROP TABLE public.shuttle_block_message_state`.execute(db);
-      await sql`DELETE FROM public.kysely_migration WHERE name = '005_blocks'`.execute(db);
+      await sql`DROP TABLE public.shuttle_message_state`.execute(db);
+      await sql`DELETE FROM public.kysely_migration WHERE name IN ('005_blocks', '006_projection_framework')`.execute(
+        db,
+      );
     };
     await reopenMigration();
     await sql`DROP INDEX public.blocks_updated_at_idx`.execute(db);

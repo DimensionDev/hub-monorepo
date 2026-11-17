@@ -12,23 +12,9 @@ import {
   HubEventStreamConsumer,
   HubSubscriber,
   MessageState,
-  OnChainEventBodyJson,
 } from "../index"; // If you want to use this as a standalone app, replace this import with "@dimensiondev/shuttle"
 import { AppDb, migrateToLatest } from "./db";
-import {
-  bytesToHexString,
-  getStorageUnitExpiry,
-  getStorageUnitType,
-  HubEvent,
-  GetInfoRequest,
-  isIdRegisterOnChainEvent,
-  isMergeOnChainHubEvent,
-  isSignerMigratedOnChainEvent,
-  isSignerOnChainEvent,
-  isStorageRentOnChainEvent,
-  isTierPurchaseOnChainEvent,
-  Message,
-} from "@dimensiondev/hub-nodejs";
+import { bytesToHexString, HubEvent, GetInfoRequest, Message } from "@dimensiondev/hub-nodejs";
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
 import { readFileSync } from "fs";
@@ -45,16 +31,29 @@ import {
   TOTAL_SHARDS,
   USE_STREAMING_RPCS_FOR_BACKFILL,
   SUBSCRIBE_RPC_TIMEOUT,
+  STREAM_MAX_DELIVERIES,
 } from "./env";
 import * as process from "node:process";
 import url from "node:url";
 import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { bytesToHex } from "../utils";
-import { processBlocksEvent } from "./blocks";
+import { ProjectionDispatcher, projections } from "./projections";
+import { storeOnChainEvent } from "./raw/onchainEvents";
 
 const hubId = "shuttle";
+
+// Keyed by schema; App methods are also invoked with a bare `this` in tests (schema undefined).
+const dispatchers = new Map<string, ProjectionDispatcher>();
+function dispatcherFor(schema: string | undefined): ProjectionDispatcher {
+  const key = schema ?? "public";
+  let dispatcher = dispatchers.get(key);
+  if (!dispatcher) {
+    dispatcher = new ProjectionDispatcher(projections, key);
+    dispatchers.set(key, dispatcher);
+  }
+  return dispatcher;
+}
 
 export class App implements MessageHandler {
   private readonly db: DB;
@@ -105,78 +104,16 @@ export class App implements MessageHandler {
       undefined,
       SUBSCRIBE_RPC_TIMEOUT,
     );
-    const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey);
+    const streamConsumer = new HubEventStreamConsumer(hub, eventStreamForRead, shardKey, {
+      maxDeliveries: STREAM_MAX_DELIVERIES,
+    });
 
     return new App(db, dbSchema, redis, hubSubscriber, streamConsumer);
   }
 
   async onHubEvent(event: HubEvent, txn: DB): Promise<boolean> {
-    const blocks = await processBlocksEvent(event, txn, this.dbSchema);
-    if (blocks.isErr()) throw blocks.error;
-    if (blocks.value) return true;
-    if (isMergeOnChainHubEvent(event)) {
-      const onChainEvent = event.mergeOnChainEventBody.onChainEvent;
-      let body: OnChainEventBodyJson | undefined;
-      if (isIdRegisterOnChainEvent(onChainEvent)) {
-        body = {
-          eventType: onChainEvent.idRegisterEventBody.eventType,
-          from: bytesToHex(onChainEvent.idRegisterEventBody.from),
-          to: bytesToHex(onChainEvent.idRegisterEventBody.to),
-          recoveryAddress: bytesToHex(onChainEvent.idRegisterEventBody.recoveryAddress),
-        };
-      } else if (isSignerOnChainEvent(onChainEvent)) {
-        body = {
-          eventType: onChainEvent.signerEventBody.eventType,
-          key: bytesToHex(onChainEvent.signerEventBody.key),
-          keyType: onChainEvent.signerEventBody.keyType,
-          metadata: bytesToHex(onChainEvent.signerEventBody.metadata),
-          metadataType: onChainEvent.signerEventBody.metadataType,
-        };
-      } else if (isStorageRentOnChainEvent(onChainEvent)) {
-        // `getStorageUnitType` here is a misnomer for the materialized "expiry units"
-        // bucket; we keep using it for parity with the existing example, but the
-        // canonical body shape is `{ payer, units, expiry }` from the protobuf body.
-        body = {
-          payer: bytesToHex(onChainEvent.storageRentEventBody.payer),
-          units: onChainEvent.storageRentEventBody.units,
-          expiry: getStorageUnitExpiry(onChainEvent),
-        };
-        // `getStorageUnitType` is referenced here purely so the import is still used by
-        // downstream forks that rely on it; it intentionally isn't persisted.
-        void getStorageUnitType(onChainEvent);
-      } else if (isSignerMigratedOnChainEvent(onChainEvent)) {
-        body = { migratedAt: onChainEvent.signerMigratedEventBody.migratedAt };
-      } else if (isTierPurchaseOnChainEvent(onChainEvent)) {
-        // `payer` is `Uint8Array` on the protobuf and would JSON-serialize as a
-        // numeric-index object in a Postgres `json` column; convert to the hex shape
-        // that matches every other on-chain event body persisted here.
-        body = {
-          tierType: onChainEvent.tierPurchaseEventBody.tierType,
-          forDays: onChainEvent.tierPurchaseEventBody.forDays,
-          payer: bytesToHex(onChainEvent.tierPurchaseEventBody.payer),
-        };
-      }
-      if (body !== undefined) {
-        try {
-          await (txn as unknown as AppDb)
-            .insertInto("onchain_events")
-            .values({
-              chainId: onChainEvent.chainId,
-              fid: onChainEvent.fid,
-              blockTimestamp: new Date(onChainEvent.blockTimestamp * 1000),
-              blockNumber: onChainEvent.blockNumber,
-              logIndex: onChainEvent.logIndex,
-              txHash: onChainEvent.transactionHash,
-              type: onChainEvent.type,
-              body,
-            })
-            .execute();
-          log.info(`Recorded OnchainEvent ${onChainEvent.type} for fid  ${onChainEvent.fid}`);
-        } catch (e) {
-          log.error("Failed to insert onchain event", e);
-        }
-      }
-    }
+    if (await dispatcherFor(this.dbSchema).processEvent(event, txn)) return true;
+    await storeOnChainEvent(event, txn);
     return false;
   }
 
@@ -227,7 +164,8 @@ export class App implements MessageHandler {
         fid,
         async (message, missingInDb, prunedInDb, revokedInDb) => {
           if (missingInDb) {
-            await HubEventProcessor.handleMissingMessage(this.db, message, this);
+            const projected = await dispatcherFor(this.dbSchema).processMissingMessage(this.db, message);
+            if (!projected) await HubEventProcessor.handleMissingMessage(this.db, message, this);
           } else if (prunedInDb || revokedInDb) {
             const messageDesc = prunedInDb ? "pruned" : revokedInDb ? "revoked" : "existing";
             log.info(`Reconciled ${messageDesc} message ${bytesToHexString(message.hash)._unsafeUnwrap()}`);

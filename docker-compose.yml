@@ -1,7 +1,7 @@
 name: shuttle
 
 x-shuttle: &shuttle
-  image: local/farcaster-shuttle:blocks-20261117
+  image: local/farcaster-shuttle:projections-20261117
   build:
     context: .
     dockerfile: Dockerfile

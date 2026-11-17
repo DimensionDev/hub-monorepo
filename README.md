@@ -9,10 +9,28 @@
 - `messages`
 - `onchain_events`
 - `blocks`（屏蔽关系）
-- `shuttle_block_message_state`（屏蔽消息的生命周期事件版本）
+- `shuttle_message_state`（被投影消息的生命周期版本，迁移 006 由 `shuttle_block_message_state` 改名而来）
+- `shuttle_projection_issues`（投影遇到的数据缺口，例如非 mainnet 消息；重放不重复记录）
 - `kysely_migration`、`kysely_migration_lock`（迁移元数据）
 
 `pgcrypto` 扩展和 `generate_ulid()` 函数用于生成主键。`casts`、`usernames` 的示例迁移不在启动迁移列表内，消息处理也不写入 casts 投影。可选用户名重建器的测试会在独立测试数据库中创建自己的测试表。
+
+### 业务投影框架
+
+设计文档见 [docs/farcaster-db](docs/farcaster-db/README.md)，新架构见 `100_shuttle-inline-projection.md`。Shuttle 消费现有 Redis Stream（`hub:<HUB_HOST>:evt:msg:<shard>`），在写入原始消息的同一事务里直接更新业务表，不经过 Kafka。
+
+- `packages/shuttle/src/example-app/projections/`：`ProjectionDispatcher` 负责按 FID 加锁（所有表共用一个锁命名空间）、生命周期守卫、原始落库，然后调用已注册的投影；目前只注册了 `blocks`。没有投影关心的事件仍走原 `HubEventProcessor`。
+- 生命周期守卫：hub 事件按 `event_id` 防重放；backfill（reconcile 补进来的消息）只允许插入，永远不会复活已删除、prune 或 revoke 的消息。
+- 投影从 `messages` 重算，active 关系与到达顺序无关。墓碑行与顺序有关：REMOVE 先于 ADD 到达时不补删除行，读取方以 `deleted_at IS NULL` 为准。
+- 可预期的数据问题写入 `shuttle_projection_issues` 并跳过该消息，不阻塞事件流。
+- `onchain_events` 以 `(chain_id, block_number, log_index)` 唯一，重放不会产生重复行。迁移 006 删除内容完全相同的历史重复；如果存在内容不同的重复会停止，需要先人工处理：
+
+```sql
+SELECT chain_id, block_number, log_index, count(*), count(DISTINCT (type, fid, tx_hash, body::text))
+FROM onchain_events GROUP BY 1, 2, 3 HAVING count(*) > 1;
+```
+
+- Redis Stream：同一事件投递超过 `STREAM_MAX_DELIVERIES` 次（默认 5）后移入 `<streamKey>:dlq` 并 ack；定期裁剪不会删除未处理或未投递的事件。
 
 ### blocks 增量转换
 
@@ -28,7 +46,7 @@ Shuttle 直接在 `POSTGRES_URL` 指定的数据库、`POSTGRES_SCHEMA` 指定�
 
 ## 服务端
 
-Dockerfile 使用固定的 DimensionDev 镜像作为依赖基础，并复制当前 `packages/shuttle/src/example-app` 源码。Compose 默认只运行 `shuttle-1`、`shuttle-2`。
+Dockerfile 在本仓库内完整构建（core → hub-nodejs → shuttle），库代码和 example-app 的修改都会进入镜像。Compose 默认只运行 `shuttle-1`、`shuttle-2`。
 
 ```bash
 cd /opt/shuttle
@@ -67,11 +85,11 @@ npm exec --yes --package=yarn@1.22.19 --call 'yarn --cwd packages/core build && 
 
 Shuttle 集成测试会重建 `shuttle_test` 数据库并清空测试 Redis。只使用隔离的本地测试实例，禁止使用服务器 `.env` 或 `.env.development` 运行测试。
 
-blocks 集成测试只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
+blocks 和投影框架集成测试（`src/blocks.integration.test.ts`、`src/projections.integration.test.ts`）只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
 
 ```bash
 cd packages/shuttle
 TEST_DATABASE_URL='postgres://shuttle@127.0.0.1:55441/postgres' \
   NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules \
-  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts --runInBand
+  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts src/projections.integration.test.ts --runInBand
 ```
