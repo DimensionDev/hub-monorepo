@@ -32,6 +32,25 @@ FROM onchain_events GROUP BY 1, 2, 3 HAVING count(*) > 1;
 
 - Redis Stream：同一事件投递超过 `STREAM_MAX_DELIVERIES` 次（默认 5）后移入 `<streamKey>:dlq` 并 ack；定期裁剪不会删除未处理或未投递的事件。
 
+> **警告：原始数据先入库、投影后上线时，这些数据不会再被分发给新投影。** reconcile（backfill）只处理库里缺失的消息，库里已有的消息不会交给 dispatcher。实时流从部署那一刻起就在写 `messages`、`onchain_events`，所以新投影上线前已经入库的数据，只能用下面的 `rebuild` 命令补投影。
+>
+> **不要跑默认的全量 backfill**（不设 `BACKFILL_PROJECTIONS_ONLY=true`）。它会把全网所有消息写进 `messages`，但不经过尚未上线的投影，等于把上面的缺口扩大到全部历史。只补投影的 backfill 不受影响：它跳过的消息不入库，以后上线新投影时仍会被当作缺失消息拉回来。
+
+#### 新增一张业务表的上线顺序
+
+1. 注册投影（实现 `Projection` 的 `apply`、`rebuildFids`、`rebuild`），部署。从部署时刻起，实时事件开始投影。
+2. 用库里已有的原始数据重建这个投影：
+
+```bash
+sudo docker compose run --rm -e REBUILD_PROJECTIONS=<name> shuttle-worker yarn start rebuild
+```
+
+   - `REBUILD_PROJECTIONS` 是逗号分隔的投影名，不设时重建全部已注册的投影；`FIDS` 可以限定范围，用于试跑。
+   - 每个 fid 一个事务，持有与实时处理相同的 fid 锁，可以在 shard 运行时执行。只读原始表、只写业务表，不修改 `messages` 和生命周期状态，可以重复执行，结果不变。
+   - 以 `Rebuild finished` 日志为结束标志，命令会自己退出。某个 fid 的数据无效时（例如历史上存过的非 mainnet 消息），该 fid 回滚、记日志并跳过，其余继续，最后退出码为 1。
+   - 命令不执行迁移；有未执行的迁移时直接拒绝运行，需要先部署 shard。
+3. 跑只补投影的 backfill（见下文），补齐节点上有、库里没有的部分。
+
 ### blocks 增量转换
 
 Shuttle 直接在 `POSTGRES_URL` 指定的数据库、`POSTGRES_SCHEMA` 指定的 schema 内生成屏蔽关系。仅处理 mainnet 的 block Link 添加、取消、compact、prune 和 revoke。原始消息、生命周期版本和业务行在同一事务中提交；失败保留 Redis 待处理事件供重试。
@@ -44,9 +63,27 @@ Shuttle 直接在 `POSTGRES_URL` 指定的数据库、`POSTGRES_SCHEMA` 指定�
 
 本轮不执行全库历史重建，也不接入其他业务表。节点没有提供或旧采集阶段已经遗漏的历史无法自动补全，业务表行数不代表全网完整关系数。不要让旧 Go 初始化器并发写入这里的 `blocks`，它没有遵守增量处理器的锁和版本规则。
 
+### 投影状态页（本地）
+
+只在本机运行的网页，查看各投影的处理情况：业务表行数、数据缺口（`shuttle_projection_issues`，按原因分组、可按 FID 筛选、导出 CSV、查看 payload）、Redis Stream 积压与 DLQ、backfill worker 和队列，以及「从数据库重建」/ backfill 的运行记录和进度。也可以在页面上发起重建和只补投影的 backfill。
+
+```bash
+cd packages/shuttle
+cp .env.dashboard.example .env.dashboard   # 填连接；不会提交（.gitignore）
+ssh -N -L 55432:127.0.0.1:5432 -L 56379:127.0.0.1:6379 <server>   # 按服务器实际端口改
+yarn dashboard                              # http://127.0.0.1:8790
+yarn dashboard --env-file <file> --addr 127.0.0.1:8791
+```
+
+- 只允许监听本机地址，非 `127.0.0.1` / `::1` / `localhost` 直接拒绝；请求的 Host 也必须是本机名。没有鉴权。
+- env 文件里放 `POSTGRES_URL`、`POSTGRES_SCHEMA`、`REDIS_URL`；进程环境变量优先。不配 `REDIS_URL` 时只显示数据库部分。某一块读取失败时单独显示错误，不会显示成 0；刷新失败时保留上一次的数据。
+- 运行记录表 `shuttle_projection_runs` 由迁移 007 创建（shard 启动时执行），所以要先部署一次。之前跑过的重建 / backfill 只在日志里。命令行的 `rebuild`、`backfill` 和 worker 也会写这张表，页面能看到它们的进度。backfill 以每批（10 个 FID）完成数计进度，全部批次完成或重试耗尽后才标记结束，不再依赖 `completionMarker`。超过 5 分钟没有心跳的 `running` 记录显示为“可能已中断”。
+- 页面上的「从数据库重建」在本机进程里执行、经隧道写服务器库（与命令行 `rebuild` 相同：每个 FID 一个事务、同一把锁、可重复）。全量重建较慢，建议仍在服务器上跑命令行；关掉页面服务会中断它，记录标为失败。同一时间只允许一个重建。
+- 页面上的 backfill 只排队“只补投影”的任务，由服务器上的 worker 执行；worker 不在线时拒绝。不提供全量原始 backfill。不指定 FID 时需要填 FID 上限，页面用 `onchain_events` 里最大的 fid 作参考值。
+
 ## 服务端
 
-没有 CI 和镜像仓库。本地 `scripts/deploy.sh` 把指定提交的 `git archive` 上传到服务器 `/opt/shuttle/releases/<sha>`，在服务器上原生构建 `shuttle:<sha>`（`nice` 降低优先级，不抢 shard 的 CPU），再切换版本。Dockerfile 先根据各 workspace 的 `package.json` 和 `yarn.lock` 安装依赖，再复制源码构建，所以只改代码时会复用依赖层。新增 workspace 时要同步更新 Dockerfile 里的 manifest 列表。
+没有 CI 和镜像仓库。本地 `scripts/deploy.sh` 把指定提交的 `git archive` 上传到服务器 `/opt/shuttle/releases/<sha>`，在服务器上原生构建 `shuttle:<sha>`，再切换版本。`nice` 只降低 docker 命令行客户端的优先级，真正执行构建的 dockerd 不受影响；2 核机器上首次构建会和 shard 争用 CPU，最好在低峰期部署。Dockerfile 先根据各 workspace 的 `package.json` 和 `yarn.lock` 安装依赖，再复制源码构建，所以只改代码时会复用依赖层。新增 workspace 时要同步更新 Dockerfile 里的 manifest 列表。
 
 ```bash
 scripts/deploy.sh deploy            # 部署 HEAD，工作区必须没有未提交的修改
@@ -82,14 +119,14 @@ scripts/deploy.sh rollback <sha>    # 切回服务器上仍保留的旧镜像，
 sudo docker compose run --rm -e BACKFILL_PROJECTIONS_ONLY=true -e FIDS=3,2,1 shuttle-worker yarn start backfill
 ```
 
-日志出现 `Reconciliation started at ... complete at ...` 后按 Ctrl-C 停止（worker 不会自己退出）。有 block 的 fid 会打出 `Backfilled projected messages`。然后查结果：
+日志出现覆盖最后一个 fid 的 `Reconciled N upto <fid>` 后按 Ctrl-C 停止（worker 不会自己退出）。不要以 `Reconciliation started at ... complete at ...` 为准：worker 并发执行任务，这条完成标记可能在 reconcile 任务真正跑完之前就打印。有 block 的 fid 会打出 `Backfilled projected messages`。然后查结果：
 
 ```sql
 SELECT count(*) AS total, count(*) FILTER (WHERE deleted_at IS NULL) AS active FROM blocks;
 SELECT projection, reason, count(*) FROM shuttle_projection_issues GROUP BY 1, 2;
 ```
 
-4. 确认无误后去掉 `FIDS` 跑全量，会排队到节点当前注册数为止，每批 10 个 fid，`CONCURRENCY` 控制并发。节点仍然要为每个 fid 返回全部 link 消息，所以会跑较久，但只写 block 相关的行。中断后可以重跑：已存在的消息会被跳过，结果不变。
+4. 确认无误后去掉 `FIDS` 跑全量（务必保留 `BACKFILL_PROJECTIONS_ONLY=true`），会排队到节点当前注册数为止，每批 10 个 fid，`CONCURRENCY` 控制并发。节点仍然要为每个 fid 返回全部 link 消息，所以会跑较久，但只写 block 相关的行。中断后可以重跑：已存在的消息会被跳过，结果不变。
 
 backfill 只能补回节点现在还保留的消息，早年已被 prune 的 block 无法恢复。
 

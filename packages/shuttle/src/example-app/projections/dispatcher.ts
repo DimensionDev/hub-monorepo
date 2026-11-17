@@ -97,13 +97,82 @@ export class ProjectionDispatcher {
     return changes.length;
   }
 
+  /**
+   * Rebuild projections from raw rows already stored in the DB (rows stored before a projection
+   * existed are never dispatched to it). Each fid runs in its own transaction under the shared
+   * per-fid lock, so it is safe while the shards keep consuming. A fid that fails is rolled back,
+   * reported and skipped; rerunning is idempotent.
+   */
+  async rebuild(
+    db: DB,
+    options: {
+      projections?: string[];
+      fids?: number[];
+      pageSize?: number;
+      onFid?: (p: string, fid: number) => unknown;
+      onFailure?: (p: string, fid: number) => void;
+    } = {},
+  ): Promise<{ rebuilt: number; failed: { projection: string; fid: number; error: string }[] }> {
+    const names = this.names(options.projections);
+    const selected = this.projections.filter((p) => names.includes(p.name));
+    const pageSize = options.pageSize ?? 1000;
+    let rebuilt = 0;
+    const failed: { projection: string; fid: number; error: string }[] = [];
+
+    for (const projection of selected) {
+      const rebuildFid = async (fid: number) => {
+        try {
+          await db.transaction().execute(async (trx) => {
+            const appDb = trx as unknown as AppDb;
+            await this.lock(appDb, fid);
+            await projection.rebuild({ db: appDb, schema: this.schema, source: { kind: "backfill" } }, fid);
+          });
+        } catch (error) {
+          options.onFailure?.(projection.name, fid);
+          failed.push({
+            projection: projection.name,
+            fid,
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return;
+        }
+        rebuilt++;
+        await options.onFid?.(projection.name, fid);
+      };
+      if (options.fids?.length) {
+        for (const fid of [...options.fids].sort((a, b) => a - b)) await rebuildFid(fid);
+        continue;
+      }
+      let after = 0;
+      for (;;) {
+        const fids = await projection.rebuildFids(db as unknown as AppDb, after, pageSize);
+        if (fids.length === 0) break;
+        for (const fid of fids) await rebuildFid(fid);
+        after = fids[fids.length - 1] ?? after;
+      }
+    }
+    return { rebuilt, failed };
+  }
+
+  /** Validates projection names; an empty list means every registered projection. */
+  names(requested: string[] = []): string[] {
+    const known = new Set(this.projections.map((p) => p.name));
+    const unknown = requested.filter((name) => !known.has(name));
+    if (unknown.length) throw new Error(`Unknown projections: ${unknown.join(", ")}`);
+    return requested.length ? [...new Set(requested)] : [...known];
+  }
+
+  private async lock(db: AppDb, fid: number): Promise<void> {
+    // One namespace for every projection so multi-table events can't deadlock each other.
+    await sql`SELECT pg_advisory_xact_lock(hashtextextended(
+      ${this.schema} || ':shuttle:fid:' || ${String(fid)}, 0))`.execute(db);
+  }
+
   private async run(db: AppDb, changes: RawChange[], source: ProjectionSource): Promise<void> {
     const fids = [...new Set(changes.map((c) => c.message.data?.fid))].sort((a, b) => (a ?? 0) - (b ?? 0));
     for (const fid of fids) {
       if (!fid) throw new HubError("bad_request.validation_failure", "Missing message fid");
-      // One namespace for every projection so multi-table events can't deadlock each other.
-      await sql`SELECT pg_advisory_xact_lock(hashtextextended(
-        ${this.schema} || ':shuttle:fid:' || ${String(fid)}, 0))`.execute(db);
+      await this.lock(db, fid);
     }
 
     const applied = new Map<Projection, RawChange[]>();

@@ -165,6 +165,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
    - `interestedIn`：只认该表需要的消息类型，尽量窄。
    - `validate`：可预期的数据问题返回 err，由 dispatcher 写 issue，不要抛异常。
    - `apply`：对涉及的 fid 从 `messages`（或 `onchain_events`）重算，或用“当前行 + 水位”；id 用 `ids.ts` 的 `conversionId(table, key)`，与 Go 实现保持一致。
+   - `table` / `stats`（可选）：业务表名和几项便宜的计数（如 `total`、`active`），状态页会显示。
 4. 在 `projections/index.ts` 的 `projections` 数组里注册。
 5. 写集成测试，至少覆盖：同一组事件打乱顺序、批内并发、全部改走 backfill 后结果一致；revoke 之后再 backfill 旧 merge 不会复活；校验失败写 issue 且事务提交。
 6. 如果数据来自 `onchain_events` 或用户名证明，dispatcher 目前只处理 message 类变更，需要先扩展 `RawChange`（见下文“下一期”）。
@@ -186,10 +187,22 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 - `RECONCILABLE_MESSAGE_TYPES` 只列出 LINK_ADD，但它对应的 `getAllLinkMessagesByFidInBatchesOf`（`src/shuttle/messageReconciliation.ts`）会调用 `getAllLinkMessagesByFid`（hub 的 sync RPC，返回该 fid 链接存储里的全部消息，包括 ADD 和 REMOVE），还会单独拉取 `getLinkCompactStateMessageByFid`，所以 block 的 REMOVE 和 COMPACT 都会经 reconcile 拉回。还没有用真实节点验证。
 - 旧 Go init 写过的业务行：投影的 id 生成规则与 Go 一致，同一业务行算出的 id 相同。旧数据与投影结果如何合并，在接入每张表时单独验证。
 
+
+## 运行记录：`shuttle_projection_runs`
+
+迁移 007 创建。每次「从数据库重建」（`rebuild`）或 backfill 一行：`kind`、`projections`（全量原始 backfill 为空数组）、`fids`（NULL 表示全部）、`trigger`（`cli` / `dashboard`）、`status`（`running` / `succeeded` / `failed`）、`total`（backfill 的批次数）、`done`、`failed_count`、`last_fid`、`details`（重建失败的 FID，最多 50 条）、`error`、`started_at` / `updated_at` / `finished_at`。
+
+- rebuild：`runRebuild`（`projections/runs.ts`）包住 `ProjectionDispatcher.rebuild`，每隔几秒在 FID 事务提交之后更新一次进度。已有心跳在 5 分钟内的 rebuild 时拒绝再开。
+- backfill：`enqueueBackfill`（`worker.ts`）入队时建记录，job 数据带 `runId` 和 `projectionsOnly`。worker 每完成一批原子加 `done`，重试耗尽的批次加 `failed_count`，两者之和达到 `total` 时置终态。
+- `updated_at` 是心跳；超过 5 分钟没有更新的 `running` 视为可能已中断。
+
+本地状态页（`example-app/dashboard/`，`yarn dashboard`）读取这张表、`shuttle_projection_issues`、各投影的 `stats` 和 Redis Stream，详见 README。
+
 ## 已知限制（本期不处理）
 
 - **停机期间 hub 已 prune 或删除的消息**：reconcile 的 `missingInHub` 回调只记日志，这些消息在 `messages` 里仍是有效状态，`reduce` 会继续认为 block 关系有效。下一期对被投影的消息类型增加“hub 已不存在 → 标记失效”的处理。
 - **墓碑行与到达顺序有关**：active 关系及其时间与顺序无关（`projections.integration.test.ts` 验证了顺序、逆序、并发、backfill 四种到达方式）。按 000005「不存在的关系不补删除行」的规则，REMOVE 先于 ADD 到达时不会生成软删除行，顺序到达则会留下一条。读取方以 `deleted_at IS NULL` 为准。
+- **原始数据先入库、投影后上线时不会被分发**：reconcile 只处理库里缺失的消息。已用 `rebuild` 命令补上（`ProjectionDispatcher.rebuild`，投影需实现 `rebuildFids` / `rebuild`）。新增业务表的上线顺序是：部署投影 → `rebuild` 已入库的原始数据 → 只补投影的 backfill。默认的全量原始 backfill 会扩大这个缺口，不要使用。
 - **backfill 性能**：每条补进来的消息单独一个事务，并且重算整个 fid，block 多的 fid 是 O(n²)。下一期在 `reconcileFids` 里按 fid 批量补齐，只重算一次。
 
 ## 下一期

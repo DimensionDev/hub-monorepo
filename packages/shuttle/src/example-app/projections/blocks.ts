@@ -3,11 +3,17 @@ import { sql } from "kysely";
 import { err, ok, Result } from "neverthrow";
 import { LinkBodyJson, MessageRow } from "../../shuttle";
 import { convertProtobufMessageBodyToJson, farcasterTimeToDate } from "../../utils";
+import type { AppDb } from "../db";
 import { blockId } from "./ids";
 import type { Projection, ProjectionContext, RawChange } from "./types";
 
 type BlockMessage = MessageRow & { body: LinkBodyJson };
-type Scope = { targets: Set<number>; full: boolean };
+/**
+ * targets: relationships to re-decide. full: a compact state was touched, so every existing row of
+ * the fid is re-checked against it. rebuild: re-decide every relationship the stored messages or
+ * the existing rows mention (used when a projection is built from already-stored raw data).
+ */
+type Scope = { targets: Set<number>; full: boolean; rebuild?: boolean };
 type Decision = { active: true; timestamp: Date } | { active: false; deletedAt: Date };
 type BlockState = { decisions: Map<number, Decision>; compact?: BlockMessage };
 
@@ -212,75 +218,90 @@ function scopes(changes: RawChange[]): Map<number, Scope> {
 }
 
 async function applyBlocks({ db }: ProjectionContext, changes: RawChange[]): Promise<void> {
-  for (const [fid, scope] of scopes(changes)) {
-    const messages = await db
-      .selectFrom("messages")
-      .selectAll()
-      .where("fid", "=", fid)
-      .where("type", "in", [MessageType.LINK_ADD, MessageType.LINK_REMOVE, MessageType.LINK_COMPACT_STATE])
-      .where(sql<string>`body ->> 'type'`, "=", "block")
-      .execute();
-    const reduced = reduce(messages);
-    if (reduced.isErr()) throw reduced.error;
-    const projection = reduced.value;
-    const existing = await db
-      .selectFrom("blocks")
-      .select([
-        "id",
-        "blockedFid",
-        sql<Date>`timestamp AT TIME ZONE 'UTC'`.as("timestamp"),
-        sql<Date | null>`deleted_at AT TIME ZONE 'UTC'`.as("deletedAt"),
-      ])
-      .where("blockerFid", "=", fid)
-      .execute();
-    const byTarget = new Map<number, typeof existing[number]>();
-    for (const row of existing) {
-      if (byTarget.has(row.blockedFid))
-        throw new HubError("bad_request.conflict", `Duplicate blocks relationship ${fid}:${row.blockedFid}`);
-      byTarget.set(row.blockedFid, row);
-      if (scope.full) scope.targets.add(row.blockedFid);
-    }
-    if (scope.full && projection.compact) {
-      for (const target of projection.decisions.keys()) scope.targets.add(target);
-    }
-    for (const target of scope.targets) {
-      const row = byTarget.get(target);
-      const decision: Decision | undefined =
-        projection.decisions.get(target) ??
-        (scope.full && projection.compact ? { active: false, deletedAt: projection.compact.timestamp } : undefined);
-      if (!decision) continue;
-      const now = new Date().toISOString();
-      if (decision.active) {
-        const timestamp = decision.timestamp;
-        if (!row) {
-          await db
-            .insertInto("blocks")
-            .values({
-              id: blockId(fid, target),
-              blockerFid: fid,
-              blockedFid: target,
-              timestamp: timestamp.toISOString(),
-              createdAt: now,
-              updatedAt: now,
-              deletedAt: null,
-            })
-            .execute();
-        } else if (row.deletedAt !== null || row.timestamp.getTime() !== timestamp.getTime()) {
-          await db
-            .updateTable("blocks")
-            .set({ timestamp: timestamp.toISOString(), deletedAt: null, updatedAt: now })
-            .where("id", "=", row.id)
-            .execute();
-        }
-      } else if (row && row.deletedAt === null) {
+  for (const [fid, scope] of scopes(changes)) await projectFid(db, fid, scope);
+}
+
+async function projectFid(db: AppDb, fid: number, scope: Scope): Promise<void> {
+  const messages = await db
+    .selectFrom("messages")
+    .selectAll()
+    .where("fid", "=", fid)
+    .where("type", "in", [MessageType.LINK_ADD, MessageType.LINK_REMOVE, MessageType.LINK_COMPACT_STATE])
+    .where(sql<string>`body ->> 'type'`, "=", "block")
+    .execute();
+  const reduced = reduce(messages);
+  if (reduced.isErr()) throw reduced.error;
+  const projection = reduced.value;
+  const existing = await db
+    .selectFrom("blocks")
+    .select([
+      "id",
+      "blockedFid",
+      sql<Date>`timestamp AT TIME ZONE 'UTC'`.as("timestamp"),
+      sql<Date | null>`deleted_at AT TIME ZONE 'UTC'`.as("deletedAt"),
+    ])
+    .where("blockerFid", "=", fid)
+    .execute();
+  const byTarget = new Map<number, typeof existing[number]>();
+  for (const row of existing) {
+    if (byTarget.has(row.blockedFid))
+      throw new HubError("bad_request.conflict", `Duplicate blocks relationship ${fid}:${row.blockedFid}`);
+    byTarget.set(row.blockedFid, row);
+    if (scope.full || scope.rebuild) scope.targets.add(row.blockedFid);
+  }
+  if (scope.rebuild || (scope.full && projection.compact)) {
+    for (const target of projection.decisions.keys()) scope.targets.add(target);
+  }
+  for (const target of scope.targets) {
+    const row = byTarget.get(target);
+    const decision: Decision | undefined =
+      projection.decisions.get(target) ??
+      (scope.full && projection.compact ? { active: false, deletedAt: projection.compact.timestamp } : undefined);
+    if (!decision) continue;
+    const now = new Date().toISOString();
+    if (decision.active) {
+      const timestamp = decision.timestamp;
+      if (!row) {
+        await db
+          .insertInto("blocks")
+          .values({
+            id: blockId(fid, target),
+            blockerFid: fid,
+            blockedFid: target,
+            timestamp: timestamp.toISOString(),
+            createdAt: now,
+            updatedAt: now,
+            deletedAt: null,
+          })
+          .execute();
+      } else if (row.deletedAt !== null || row.timestamp.getTime() !== timestamp.getTime()) {
         await db
           .updateTable("blocks")
-          .set({ deletedAt: decision.deletedAt.toISOString(), updatedAt: now })
+          .set({ timestamp: timestamp.toISOString(), deletedAt: null, updatedAt: now })
           .where("id", "=", row.id)
           .execute();
       }
+    } else if (row && row.deletedAt === null) {
+      await db
+        .updateTable("blocks")
+        .set({ deletedAt: decision.deletedAt.toISOString(), updatedAt: now })
+        .where("id", "=", row.id)
+        .execute();
     }
   }
+}
+
+/** Blocker fids with stored block messages or existing rows, ascending, after `afterFid`. */
+async function rebuildFids(db: AppDb, afterFid: number, limit: number): Promise<number[]> {
+  const rows = await sql<{ fid: number }>`
+    SELECT fid FROM (
+      SELECT DISTINCT fid FROM messages
+      WHERE type IN (${MessageType.LINK_ADD}, ${MessageType.LINK_REMOVE}, ${MessageType.LINK_COMPACT_STATE})
+        AND body ->> 'type' = 'block' AND fid > ${afterFid}
+      UNION
+      SELECT DISTINCT blocker_fid AS fid FROM blocks WHERE blocker_fid > ${afterFid}
+    ) f ORDER BY fid LIMIT ${limit}`.execute(db);
+  return rows.rows.map((row) => Number(row.fid));
 }
 
 export const blocksProjection: Projection = {
@@ -290,4 +311,18 @@ export const blocksProjection: Projection = {
   interestedIn: (change) => isBlock(change.message),
   validate: (change) => validate(change.message),
   apply: applyBlocks,
+  rebuildFids,
+  rebuild: ({ db }, fid) => projectFid(db, fid, { targets: new Set<number>(), full: false, rebuild: true }),
+  table: "blocks",
+  stats: async (db) => {
+    const row = await db
+      .selectFrom("blocks")
+      .select([
+        sql<string>`count(*)`.as("total"),
+        sql<string>`count(*) FILTER (WHERE deleted_at IS NULL)`.as("active"),
+        sql<string>`count(DISTINCT blocker_fid) FILTER (WHERE deleted_at IS NULL)`.as("blockers"),
+      ])
+      .executeTakeFirst();
+    return { total: Number(row?.total ?? 0), active: Number(row?.active ?? 0), blockers: Number(row?.blockers ?? 0) };
+  },
 };

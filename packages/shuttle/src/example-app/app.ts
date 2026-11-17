@@ -13,7 +13,7 @@ import {
   HubSubscriber,
   MessageState,
 } from "../index"; // If you want to use this as a standalone app, replace this import with "@dimensiondev/shuttle"
-import { AppDb, migrateToLatest } from "./db";
+import { AppDb, migrateToLatest, pendingMigrations } from "./db";
 import { bytesToHexString, HubEvent, GetInfoRequest, Message } from "@dimensiondev/hub-nodejs";
 import { log } from "./log";
 import { Command } from "@commander-js/extra-typings";
@@ -33,13 +33,15 @@ import {
   SUBSCRIBE_RPC_TIMEOUT,
   STREAM_MAX_DELIVERIES,
   BACKFILL_PROJECTIONS_ONLY,
+  REBUILD_PROJECTIONS,
 } from "./env";
 import * as process from "node:process";
 import url from "node:url";
 import { ok, Result } from "neverthrow";
-import { getQueue, getWorker } from "./worker";
+import { enqueueBackfill, getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
 import { backfillFidForProjections, ProjectionDispatcher, projections } from "./projections";
+import { runRebuild } from "./projections/runs";
 import { storeOnChainEvent } from "./raw/onchainEvents";
 
 const hubId = "shuttle";
@@ -112,6 +114,10 @@ export class App implements MessageHandler {
     return new App(db, dbSchema, redis, hubSubscriber, streamConsumer);
   }
 
+  get appDb(): AppDb {
+    return this.db as unknown as AppDb;
+  }
+
   async onHubEvent(event: HubEvent, txn: DB): Promise<boolean> {
     if (await dispatcherFor(this.dbSchema).processEvent(event, txn)) return true;
     await storeOnChainEvent(event, txn);
@@ -152,7 +158,7 @@ export class App implements MessageHandler {
     });
   }
 
-  async reconcileFids(fids: number[]) {
+  async reconcileFids(fids: number[], projectionsOnly = BACKFILL_PROJECTIONS_ONLY) {
     const reconciler = new MessageReconciliation(
       // biome-ignore lint/style/noNonNullAssertion: client is always initialized
       this.hubSubscriber.hubClient!,
@@ -160,7 +166,7 @@ export class App implements MessageHandler {
       log,
       undefined,
     );
-    if (BACKFILL_PROJECTIONS_ONLY) {
+    if (projectionsOnly) {
       const dispatcher = dispatcherFor(this.dbSchema);
       for (const fid of fids) {
         const { missing, projected } = await backfillFidForProjections(
@@ -196,9 +202,9 @@ export class App implements MessageHandler {
   }
 
   async backfillFids(fids: number[], backfillQueue: Queue) {
-    const startedAt = Date.now();
+    let maxFid: number | undefined;
     if (fids.length === 0) {
-      let maxFid = MAX_FID ? parseInt(MAX_FID) : undefined;
+      maxFid = MAX_FID ? parseInt(MAX_FID) : undefined;
       if (!maxFid) {
         const getInfoResult = await this.hubSubscriber.hubClient?.getInfo(GetInfoRequest.create({}));
         if (getInfoResult?.isErr()) {
@@ -213,18 +219,15 @@ export class App implements MessageHandler {
         }
       }
       log.info(`Queuing up fids upto: ${maxFid}`);
-      // create an array of arrays in batches of 100 upto maxFid
-      const batchSize = 10;
-      const fids = Array.from({ length: Math.ceil(maxFid / batchSize) }, (_, i) => i * batchSize).map((fid) => fid + 1);
-      for (const start of fids) {
-        const subset = Array.from({ length: batchSize }, (_, i) => start + i);
-        await backfillQueue.add("reconcile", { fids: subset });
-      }
-    } else {
-      await backfillQueue.add("reconcile", { fids });
     }
-    await backfillQueue.add("completionMarker", { startedAt });
-    log.info("Backfill jobs queued");
+    const { runId, jobs } = await enqueueBackfill(this.db as unknown as AppDb, backfillQueue, {
+      fids,
+      maxFid,
+      projectionsOnly: BACKFILL_PROJECTIONS_ONLY,
+      projections: BACKFILL_PROJECTIONS_ONLY ? projections.map((p) => p.name) : [],
+      trigger: "cli",
+    });
+    log.info({ runId, jobs }, "Backfill jobs queued");
   }
 
   private async processHubEvent(hubEvent: HubEvent) {
@@ -276,6 +279,35 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
     await worker.run();
   }
 
+  async function rebuild() {
+    const fids = BACKFILL_FIDS ? BACKFILL_FIDS.split(",").map((fid) => parseInt(fid)) : [];
+    log.info(
+      { schema: POSTGRES_SCHEMA, projections: REBUILD_PROJECTIONS, fids },
+      "Rebuilding projections from raw tables",
+    );
+    const db = getDbClient(POSTGRES_URL, POSTGRES_SCHEMA);
+    try {
+      // Rebuild never migrates: the shards own migrations, deploy them first.
+      const pending = await pendingMigrations(db, POSTGRES_SCHEMA, log);
+      if (pending.length) throw new Error(`Pending migrations ${pending.join(", ")}; deploy the shards first`);
+      const startedAt = Date.now();
+      const { runId, rebuilt, failed } = await runRebuild(db, dispatcherFor(POSTGRES_SCHEMA), {
+        projections: REBUILD_PROJECTIONS,
+        fids,
+        trigger: "cli",
+        onStarted: (id) => log.info({ runId: id }, "Rebuild run started"),
+        onFid: (projection, fid, count) => {
+          if (count % 1000 === 0) log.info({ projection, fid, count }, "Rebuild progress");
+        },
+      });
+      for (const failure of failed) log.error(failure, "Rebuild failed for fid");
+      log.info({ runId, rebuilt, failed: failed.length, seconds: (Date.now() - startedAt) / 1000 }, "Rebuild finished");
+      if (failed.length) globalThis.process.exitCode = 1;
+    } finally {
+      await db.destroy();
+    }
+  }
+
   // for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   //   process.on(signal, async () => {
   //     log.info(`Received ${signal}. Shutting down...`);
@@ -297,6 +329,10 @@ if (import.meta.url.endsWith(url.pathToFileURL(process.argv[1] || "").toString()
   program.command("start").description("Starts the shuttle").action(start);
   program.command("backfill").description("Queue up backfill for the worker").action(backfill);
   program.command("worker").description("Starts the backfill worker").action(worker);
+  program
+    .command("rebuild")
+    .description("Rebuild projections from raw rows already in the DB (REBUILD_PROJECTIONS, FIDS)")
+    .action(rebuild);
 
   program.parse(process.argv);
 }

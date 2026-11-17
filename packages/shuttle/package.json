@@ -41,6 +41,7 @@
   "scripts": {
     "build": "tsup --config tsup.config.ts",
     "start": "tsx src/example-app/app.ts",
+    "dashboard": "tsx src/example-app/dashboard/main.ts",
     "clean": "rimraf ./dist",
     "lint": "biome format src/ --write && biome check src/ --apply",
     "lint:ci": "biome ci src/",

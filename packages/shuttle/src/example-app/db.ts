@@ -6,6 +6,7 @@ import * as messages from "./migrations/001_initial_migration";
 import * as onchainEvents from "./migrations/003_onchain_events";
 import * as blocks from "./migrations/005_blocks";
 import * as projectionFramework from "./migrations/006_projection_framework";
+import * as projectionRuns from "./migrations/007_projection_runs";
 
 const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logger) => {
   const migrator = new Migrator({
@@ -18,12 +19,19 @@ const createMigrator = async (db: Kysely<HubTables>, dbSchema: string, log: Logg
           "003_onchain_events": onchainEvents,
           "005_blocks": { up: (db) => blocks.up(db, dbSchema) },
           "006_projection_framework": { up: (db) => projectionFramework.up(db, dbSchema) },
+          "007_projection_runs": { up: (db) => projectionRuns.up(db, dbSchema) },
         };
       },
     },
   });
 
   return migrator;
+};
+
+/** Names of registered migrations not yet applied (commands that must not migrate check this). */
+export const pendingMigrations = async (db: Kysely<HubTables>, dbSchema: string, log: Logger): Promise<string[]> => {
+  const migrator = await createMigrator(db, dbSchema, log);
+  return (await migrator.getMigrations()).filter((m) => !m.executedAt).map((m) => m.name);
 };
 
 export const migrateToLatest = async (
@@ -79,6 +87,23 @@ export interface AppTables extends HubTables {
     reason: string;
     payload: unknown;
     createdAt: ColumnType<Date, never, never>;
+  };
+  shuttleProjectionRuns: {
+    id: ColumnType<string, never, never>;
+    kind: "rebuild" | "backfill";
+    projections: string[];
+    fids: ColumnType<string[] | null, number[] | null, number[] | null>;
+    trigger: "cli" | "dashboard";
+    status: "running" | "succeeded" | "failed";
+    total: number | null;
+    done: ColumnType<number, number | undefined, number>;
+    failedCount: ColumnType<number, number | undefined, number>;
+    lastFid: ColumnType<string | null, number | null | undefined, number | null>;
+    details: ColumnType<unknown, string | null | undefined, string | null>;
+    error: string | null;
+    startedAt: ColumnType<Date, never, never>;
+    updatedAt: ColumnType<Date, never, Date>;
+    finishedAt: ColumnType<Date | null, never, Date | null>;
   };
 }
 
