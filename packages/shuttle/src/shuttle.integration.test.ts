@@ -148,6 +148,7 @@ describe("shuttle", () => {
       "onchain_events",
       "shuttle_message_state",
       "shuttle_projection_issues",
+      "shuttle_projection_runs",
     ]);
   });
 
