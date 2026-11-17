@@ -2,6 +2,7 @@ import { blocksProjection } from "./blocks";
 import type { Projection } from "./types";
 
 export { ProjectionDispatcher, mutations } from "./dispatcher";
+export { backfillFidForProjections, reconcileTypesFor } from "./backfill";
 export { blockId, conversionId, uuidV5 } from "./ids";
 export type { Projection, ProjectionContext, ProjectionSource, RawChange } from "./types";
 

@@ -32,13 +32,14 @@ import {
   USE_STREAMING_RPCS_FOR_BACKFILL,
   SUBSCRIBE_RPC_TIMEOUT,
   STREAM_MAX_DELIVERIES,
+  BACKFILL_PROJECTIONS_ONLY,
 } from "./env";
 import * as process from "node:process";
 import url from "node:url";
 import { ok, Result } from "neverthrow";
 import { getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { ProjectionDispatcher, projections } from "./projections";
+import { backfillFidForProjections, ProjectionDispatcher, projections } from "./projections";
 import { storeOnChainEvent } from "./raw/onchainEvents";
 
 const hubId = "shuttle";
@@ -159,6 +160,20 @@ export class App implements MessageHandler {
       log,
       undefined,
     );
+    if (BACKFILL_PROJECTIONS_ONLY) {
+      const dispatcher = dispatcherFor(this.dbSchema);
+      for (const fid of fids) {
+        const { missing, projected } = await backfillFidForProjections(
+          reconciler,
+          this.db,
+          dispatcher,
+          projections,
+          fid,
+        );
+        if (projected > 0) log.info({ fid, missing, projected }, "Backfilled projected messages");
+      }
+      return;
+    }
     for (const fid of fids) {
       await reconciler.reconcileMessagesForFid(
         fid,

@@ -29,3 +29,7 @@ export const SUBSCRIBE_RPC_TIMEOUT = parseInt(process.env["SUBSCRIBE_RPC_TIMEOUT
 const parsedMaxDeliveries = parseInt(process.env["STREAM_MAX_DELIVERIES"] || "5");
 export const STREAM_MAX_DELIVERIES =
   Number.isFinite(parsedMaxDeliveries) && parsedMaxDeliveries > 0 ? parsedMaxDeliveries : 5;
+
+// Backfill only what registered projections need: reconcile only their message families and
+// skip (do not store) messages no projection cares about. Off by default (full raw backfill).
+export const BACKFILL_PROJECTIONS_ONLY = process.env["BACKFILL_PROJECTIONS_ONLY"] === "true";

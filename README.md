@@ -57,7 +57,36 @@ sudo docker compose logs --tail=50 shuttle-1 shuttle-2
 
 仅在首次启动空 Redis、且只需要从当前时刻同步时，运行一次 `sudo ./scripts/seed-last-event.sh`。日常重启不要再次运行，以免跳过停机期间的事件。
 
-`shuttle-watchdog.timer` 保持停用。Backfill 和 worker 暂不启动，本轮仅处理增量事件。升级后由两个现有 shard 进程执行启动迁移和 blocks 转换；保留原 Redis 订阅位置，不重新 seed。当前代码修改不会自动部署到服务器。
+`shuttle-watchdog.timer` 保持停用。worker 平时不启动，只在按下文步骤执行 backfill 时临时运行。升级后由两个现有 shard 进程执行启动迁移和 blocks 转换；保留原 Redis 订阅位置，不重新 seed。当前代码修改不会自动部署到服务器。
+
+### 部署新版本并用 backfill 补 blocks
+
+1. 部署前检查 `onchain_events` 有没有内容不同的重复行（见上文 SQL）。第二列都等于 1 才能继续。
+2. 更新 `/opt/shuttle` 到新提交后重建镜像，再重启两个 shard 进程。迁移 006 由 shard 进程在启动时执行，`backfill` 命令不跑迁移，所以必须先完成这一步：
+
+```bash
+cd /opt/shuttle
+sudo docker compose build shuttle-1
+sudo docker compose up -d --no-deps --force-recreate shuttle-1 shuttle-2
+sudo docker compose logs --tail=50 shuttle-1 shuttle-2 | grep -i migration
+```
+
+3. 先用少量 fid 试跑只补投影的 backfill。`BACKFILL_PROJECTIONS_ONLY=true` 表示只向节点拉取投影需要的消息族（blocks 对应 link 消息和 compact），没有投影关心的消息（例如 follow）不写库，每个 fid 在一个事务里只重算一次：
+
+```bash
+sudo docker compose run --rm -e BACKFILL_PROJECTIONS_ONLY=true -e FIDS=3,2,1 shuttle-worker yarn start backfill
+```
+
+日志出现 `Reconciliation started at ... complete at ...` 后按 Ctrl-C 停止（worker 不会自己退出）。有 block 的 fid 会打出 `Backfilled projected messages`。然后查结果：
+
+```sql
+SELECT count(*) AS total, count(*) FILTER (WHERE deleted_at IS NULL) AS active FROM blocks;
+SELECT projection, reason, count(*) FROM shuttle_projection_issues GROUP BY 1, 2;
+```
+
+4. 确认无误后去掉 `FIDS` 跑全量，会排队到节点当前注册数为止，每批 10 个 fid，`CONCURRENCY` 控制并发。节点仍然要为每个 fid 返回全部 link 消息，所以会跑较久，但只写 block 相关的行。中断后可以重跑：已存在的消息会被跳过，结果不变。
+
+backfill 只能补回节点现在还保留的消息，早年已被 prune 的 block 无法恢复。
 
 ## 本地开发
 

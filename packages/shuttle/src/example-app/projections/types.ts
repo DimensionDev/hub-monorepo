@@ -1,5 +1,6 @@
 import type { HubResult, Message } from "@dimensiondev/hub-nodejs";
 import type { StoreMessageOperation } from "../../shuttle";
+import type { ReconcilableMessageType } from "../../shuttle/messageReconciliation";
 import type { AppDb } from "../db";
 
 /** Where a change came from. Backfill (reconcile) messages carry no hub event id. */
@@ -21,6 +22,8 @@ export type ProjectionContext = { db: AppDb; schema: string; source: ProjectionS
  */
 export interface Projection {
   name: string;
+  /** Hub `getAll*MessagesByFid` families that can contain this projection's messages (for backfill). */
+  reconcileTypes: ReconcilableMessageType[];
   interestedIn(change: RawChange): boolean;
   /** Expected data problems are reported here and recorded as issues; the change is skipped. */
   validate?(change: RawChange): HubResult<void>;

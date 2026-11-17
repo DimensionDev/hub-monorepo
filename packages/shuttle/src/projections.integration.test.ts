@@ -1,10 +1,21 @@
 import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { sql } from "kysely";
-import { Factories, FarcasterNetwork, HubEvent, HubEventType, Message, MessageType } from "@dimensiondev/hub-nodejs";
+import {
+  Factories,
+  FarcasterNetwork,
+  HubEvent,
+  HubEventType,
+  HubRpcClient,
+  Message,
+  MessagesResponse,
+  MessageType,
+} from "@dimensiondev/hub-nodejs";
+import { ok } from "neverthrow";
 import { App } from "./example-app/app";
 import { migrateToLatest } from "./example-app/db";
-import { ProjectionDispatcher, projections } from "./example-app/projections";
+import { backfillFidForProjections, ProjectionDispatcher, projections } from "./example-app/projections";
+import { MessageReconciliation } from "./shuttle/messageReconciliation";
 import { log } from "./log";
 import { DB, getDbClient, HubEventProcessor } from "./shuttle";
 
@@ -143,6 +154,54 @@ integration("projection framework", () => {
     expect((await state())[0]?.deletedAt).toBeNull();
     await HubEventProcessor.processHubEvent(db, revokeEvent(5, add), handler);
     expect((await state())[0]?.deletedAt).not.toBeNull();
+  });
+
+  test("projection-only backfill fetches link families, projects blocks once and skips follows", async () => {
+    const follow = Message.create({
+      data: {
+        fid: 100,
+        type: MessageType.LINK_ADD,
+        timestamp: 1000,
+        network: FarcasterNetwork.MAINNET,
+        linkBody: { type: "follow", targetFid: 999 },
+      },
+      hash: Buffer.alloc(20, 9),
+    });
+    const compactState = Message.create({
+      data: {
+        fid: 100,
+        type: MessageType.LINK_COMPACT_STATE,
+        timestamp: 1300,
+        network: FarcasterNetwork.MAINNET,
+        linkCompactStateBody: { type: "block", targetFids: [400, 500] },
+      },
+      hash: Buffer.alloc(20, 8),
+    });
+    const calls: string[] = [];
+    const hub = {
+      getAllLinkMessagesByFid: async () => {
+        calls.push("links");
+        return ok(MessagesResponse.create({ messages: [...history, follow] }));
+      },
+      getLinkCompactStateMessageByFid: async () => {
+        calls.push("compact");
+        return ok(MessagesResponse.create({ messages: [compactState] }));
+      },
+    };
+    const reconciler = new MessageReconciliation(hub as unknown as HubRpcClient, db, log);
+
+    const first = await backfillFidForProjections(reconciler, db, dispatcher, projections, 100);
+    expect(calls).toEqual(["links", "compact"]);
+    expect(first).toEqual({ missing: 6, projected: 5 });
+    expect((await state()).filter((r) => r.deletedAt === null).map((r) => r.blockedFid)).toEqual([400, 500]);
+    const stored = await db.selectFrom("messages").select("hash").execute();
+    expect(stored).toHaveLength(5);
+    expect(stored.some((m) => Buffer.from(m.hash).equals(follow.hash))).toBe(false);
+
+    const before = await state();
+    const second = await backfillFidForProjections(reconciler, db, dispatcher, projections, 100);
+    expect(second).toEqual({ missing: 1, projected: 0 });
+    expect(await state()).toEqual(before);
   });
 
   test("messages no projection cares about fall back to the generic path", async () => {

@@ -285,6 +285,8 @@ async function applyBlocks({ db }: ProjectionContext, changes: RawChange[]): Pro
 
 export const blocksProjection: Projection = {
   name: "blocks",
+  // getAllLinkMessagesByFid returns adds and removes; reconciliation also fetches compact states.
+  reconcileTypes: [MessageType.LINK_ADD],
   interestedIn: (change) => isBlock(change.message),
   validate: (change) => validate(change.message),
   apply: applyBlocks,

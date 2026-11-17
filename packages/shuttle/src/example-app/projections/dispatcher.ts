@@ -83,6 +83,20 @@ export class ProjectionDispatcher {
     return true;
   }
 
+  /**
+   * Backfill a batch of messages missing from the DB in one transaction, so each projection
+   * recomputes a fid once instead of once per message. Messages no projection cares about are
+   * ignored (not stored). Returns how many messages were projected.
+   */
+  async processMissingMessages(db: DB, messages: Message[]): Promise<number> {
+    const changes = messages
+      .map((message): RawChange => ({ kind: "message", message, operation: "merge" }))
+      .filter((change) => this.interested(change).length > 0);
+    if (changes.length === 0) return 0;
+    await db.transaction().execute((trx) => this.run(trx as unknown as AppDb, changes, { kind: "backfill" }));
+    return changes.length;
+  }
+
   private async run(db: AppDb, changes: RawChange[], source: ProjectionSource): Promise<void> {
     const fids = [...new Set(changes.map((c) => c.message.data?.fid))].sort((a, b) => (a ?? 0) - (b ?? 0));
     for (const fid of fids) {
