@@ -771,7 +771,7 @@ function openAction(kind) {
   }
   <div class="form-hint">${
     isRebuild
-      ? "在本机进程里执行，经网络写服务器数据库；每个 FID 一个事务，持有与实时处理相同的锁，可在 shard 运行时执行，可重复执行。全量重建较慢，建议在服务器用 <code>docker compose run … yarn start rebuild</code>（同样会出现在运行记录里）。关闭本页面服务会中断重建。"
+      ? "在本机进程里执行，经网络写服务器数据库；每个 FID 一个事务，持有与实时处理相同的锁，可在 shard 运行时执行，可重复执行。全量重建较慢，建议在服务器用 <code>docker compose run … pnpm start rebuild</code>（同样会出现在运行记录里）。关闭本页面服务会中断重建。"
       : `任务排进 Redis 队列，由服务器上的 worker 执行（当前 ${
           worker ? `在线 ${worker} 个` : "<b>不在线</b>"
         }）。每批 10 个 FID，中断后可重跑，已存在的消息会跳过。`

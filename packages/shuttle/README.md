@@ -31,26 +31,26 @@ If you want to run the test the app, do the following:
 nvm install 21
 
 # If necessary, build packages/core dependency
-( cd packages/core && yarn install && yarn build; )
+( cd packages/core && pnpm install && pnpm build; )
 
 # If necessary, build packages/hub-nodejs dependency
-( cd packages/hub-nodejs && yarn install && yarn build; )
+( cd packages/hub-nodejs && pnpm install && pnpm build; )
 
 # Do remainder within the packages/shuttle directory
 cd packages/shuttle
-yarn install && yarn build
+pnpm install && pnpm build
 
 # Start the db dependencies
 docker compose up postgres redis
 
 # To perform reconciliation/backfill, start the worker (can run multiple processes to speed this up)
-POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false yarn start worker
+POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false pnpm start worker
 
 # Kick off the backfill process (configure with MAX_FID=100 or BACKFILL_FIDS=1,2,3)
-POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false yarn start backfill
+POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false pnpm start backfill
 
 # Start the app and sync messages from the event stream
-POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false yarn start start
+POSTGRES_URL=postgres://shuttle:password@0.0.0.0:6541 REDIS_URL=0.0.0.0:16379 HUB_HOST=<host>:<port> HUB_SSL=false pnpm start start
 ```
 
 

@@ -22,16 +22,18 @@ jobs:
   release:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # setup-node writes an .npmrc containing ${NODE_AUTH_TOKEN}, and yarn expands
+    # setup-node writes an .npmrc containing ${NODE_AUTH_TOKEN}, and pnpm expands
     # env vars found in .npmrc as soon as it starts. Keep the token available to
-    # every step (not just the publish step) or `yarn install` fails with
-    # "Failed to replace env in config: ${NODE_AUTH_TOKEN}".
+    # every step (not just the publish step) or `pnpm install` cannot read the config.
     env:
       NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+
+      # Installs the pnpm version pinned in package.json "packageManager".
+      - uses: pnpm/action-setup@v6
 
       # setup-node writes an .npmrc that maps the @dimensiondev scope to
       # https://npm.pkg.github.com and authenticates with ${NODE_AUTH_TOKEN}.
@@ -42,18 +44,12 @@ jobs:
           node-version: "24"
           registry-url: "https://npm.pkg.github.com"
           scope: "@dimensiondev"
-
-      - name: Restore cached dependencies for Node modules.
-        id: module-cache
-        uses: actions/cache@v6
-        with:
-          path: ${{ github.workspace }}/node_modules
-          key: ${{ runner.os }}--node--${{ hashFiles('**/yarn.lock') }}
+          cache: pnpm
 
       - name: Install dependencies
         run: |
           npx node-gyp@12.2.0 install
-          yarn install
+          pnpm install --frozen-lockfile
 
       # NOTE: Pull requests opened by changesets/action with secrets.GITHUB_TOKEN
       # do not trigger other workflows (GitHub suppresses recursive runs), so CI
@@ -64,8 +60,8 @@ jobs:
         id: changesets
         uses: changesets/action@v1.9.0
         with:
-          publish: yarn release-packages
-          version: yarn version-packages
+          publish: pnpm release-packages
+          version: pnpm version-packages
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The .npmrc written by setup-node reads the registry token from this variable.

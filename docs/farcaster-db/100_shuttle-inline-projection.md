@@ -196,7 +196,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 - backfill：`enqueueBackfill`（`worker.ts`）入队时建记录，job 数据带 `runId` 和 `projectionsOnly`。worker 每完成一批原子加 `done`，重试耗尽的批次加 `failed_count`，两者之和达到 `total` 时置终态。
 - `updated_at` 是心跳；超过 5 分钟没有更新的 `running` 视为可能已中断。
 
-本地状态页（`example-app/dashboard/`，`yarn dashboard`）读取这张表、`shuttle_projection_issues`、各投影的 `stats` 和 Redis Stream，详见 README。
+本地状态页（`example-app/dashboard/`，`pnpm dashboard`）读取这张表、`shuttle_projection_issues`、各投影的 `stats` 和 Redis Stream，详见 README。
 
 ## 已知限制（本期不处理）
 

@@ -39,13 +39,13 @@
     "lint:ci": "biome ci src/",
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "test:ci": "ENVIRONMENT=test NODE_OPTIONS=--experimental-vm-modules jest --ci --forceExit --coverage",
-    "prepublishOnly": "yarn run build"
+    "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
     "@ethersproject/abstract-signer": "5.8.0",
     "@farcaster/fishery": "2.2.3",
     "@noble/ed25519": "1.7.3",
-    "biome-config-custom": "*",
+    "biome-config-custom": "workspace:*",
     "ethers": "6.17.0",
     "ethers5": "npm:ethers@5.8.0",
     "node-gyp": "12.2.0",

@@ -2,7 +2,7 @@
  * Local projection dashboard. Loads its own env file before any app module reads `process.env`,
  * so it can point at a remote database (e.g. through an SSH tunnel) without touching `.env`.
  *
- *   yarn dashboard [--env-file .env.dashboard] [--addr 127.0.0.1:8790]
+ *   pnpm dashboard [--env-file .env.dashboard] [--addr 127.0.0.1:8790]
  */
 import { existsSync } from "node:fs";
 import { parseArgs } from "node:util";

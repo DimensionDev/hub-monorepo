@@ -29,14 +29,14 @@
     "protoc": "LIBRARY=hub-web ../../generate-protos.sh",
     "lint": "biome format src/ examples/ --write && biome check src/ examples/ --apply",
     "lint:ci": "biome ci src/ examples/",
-    "prepublishOnly": "yarn run build"
+    "prepublishOnly": "pnpm run build"
   },
   "devDependencies": {
-    "biome-config-custom": "*",
+    "biome-config-custom": "workspace:*",
     "ts-proto": "1.181.2"
   },
   "dependencies": {
-    "@dimensiondev/core": "^0.21.0",
+    "@dimensiondev/core": "workspace:^",
     "@improbable-eng/grpc-web": "^0.15.0",
     "rxjs": "^7.8.0"
   }

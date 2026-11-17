@@ -4,7 +4,7 @@
     ".eslintcache": true,
     "build": true,
     "node_modules": true,
-    "yarn.lock": true
+    "pnpm-lock.yaml": true
   },
   "editor.formatOnSave": true,
   "editor.defaultFormatter": "biomejs.biome",

@@ -43,7 +43,7 @@ Before you get down to coding, take a minute to consider this:
 First, ensure that the following are installed globally on your machine:
 
 - [Node.js 20.11+](https://nodejs.org/en/download/releases) using [nvm](https://github.com/nvm-sh/nvm)
-- [Yarn](https://classic.yarnpkg.com/lang/en/docs/install)
+- [pnpm](https://pnpm.io/installation) (the version pinned in `package.json` `packageManager`)
 - [Foundry](https://book.getfoundry.sh/getting-started/installation#using-foundryup)
 - [Protobuf compiler](https://protobuf.dev/downloads/)
 - [Rust](https://www.rust-lang.org/tools/install)
@@ -51,11 +51,11 @@ First, ensure that the following are installed globally on your machine:
 
 Then, from the root folder run:
 
-- `yarn install` to install dependencies
-- `yarn build` to build packages
-- `yarn test` to ensure that the test suite runs correctly
+- `pnpm install` to install dependencies
+- `pnpm build` to build packages
+- `pnpm test` to ensure that the test suite runs correctly
 
-NOTE: Running `yarn test` currently fails due to an environment issue with shuttle. you can still run `yarn test` successfully from all the other repositories.
+NOTE: Running `pnpm test` currently fails due to an environment issue with shuttle. you can still run `pnpm test` successfully from all the other repositories.
 
 ### 2.2 Signing Commits
 
@@ -81,14 +81,14 @@ max-cache-ttl 100000000
 
 ### 2.3 Navigating the Monorepo
 
-The repository is a monorepo with a primary application in the `/apps/` folder that imports several packages `/packages/`. It is written primarily in Typescript and uses Yarn to orchestrate tasks and [TurboRepo](https://turbo.build/) as its build system. Some performance intensive code is written in Rust and compiled with Cargo.
+The repository is a monorepo with a primary application in the `/apps/` folder that imports several packages `/packages/`. It is written primarily in Typescript and uses pnpm workspaces to orchestrate tasks and [TurboRepo](https://turbo.build/) as its build system. Some performance intensive code is written in Rust and compiled with Cargo.
 
-You can run commands like `yarn test` and `yarn build` which TurboRepo will automatically parallelize and execute across all workspaces. To execute the application, you'll need to navigate into the app folder and follow the instructions there. The TurboRepo documentation covers other important topics like:
+You can run commands like `pnpm test` and `pnpm build` which TurboRepo will automatically parallelize and execute across all workspaces. To execute the application, you'll need to navigate into the app folder and follow the instructions there. The TurboRepo documentation covers other important topics like:
 
 - [Installing Packages](https://turbo.build/repo/docs/handbook/package-installation)
 - [Creating New Packages](https://turbo.build/repo/docs/handbook/sharing-code/internal-packages)
 
-TurboRepo uses a local cache which can be disabled by adding the `--force` option to yarn commands. Remote caching is not enabled since the performance gains at our scale are not worth the cost of introducing subtle caching bugs.
+TurboRepo uses a local cache which can be disabled by adding the `--force` option to pnpm commands. Remote caching is not enabled since the performance gains at our scale are not worth the cost of introducing subtle caching bugs.
 
 ## 3. Proposing Changes
 
@@ -262,7 +262,7 @@ Called Signer.verify with the correct parameter to ensure that older signature
 types would not pass verification in our Signer Sets
 ```
 
-Make sure that all your files are formatted correctly. We use `biome` to format TypeScript files and `rustfmt` for the Rust files. To auto-format all the files run `yarn lint` to format all source files.
+Make sure that all your files are formatted correctly. We use `biome` to format TypeScript files and `rustfmt` for the Rust files. To auto-format all the files run `pnpm lint` to format all source files.
 
 ### 3.5 Adding Changesets
 
@@ -270,7 +270,7 @@ All PRs with meaningful changes should have a [changeset](https://github.com/cha
 description of the modifications being made to each package. Changesets are automatically converted into a changelog
 when the repo manager runs a release process.
 
-1. Run `yarn changeset` to start the process
+1. Run `pnpm changeset` to start the process
 2. Select the packages being modified with the space key
 3. Select minor version if breaking change or patch otherwise, since we haven't release 1.0 yet
 4. Commit the generated files into your branch.
@@ -285,7 +285,7 @@ built-in `GITHUB_TOKEN`, so no personal npm token is needed.
 2. The `Release Packages` workflow opens a "Version Packages" PR. Review the changelog and version bumps in it
 3. Check that `package.json` was bumped correctly
 4. If the protocol version changes, bump `FARCASTER_VERSIONS_SCHEDULE` and `FARCASTER_VERSION`
-5. Merge the "Version Packages" PR. The workflow then runs `yarn build && yarn changeset publish` and pushes the release tags
+5. Merge the "Version Packages" PR. The workflow then runs `pnpm build && pnpm changeset publish` and pushes the release tags
 6. If a publish needs to be re-run, trigger the `Release Packages` workflow manually from the Actions tab
 
 ### 3.7 Working in Rust
@@ -306,6 +306,6 @@ The automated release is described in [Releasing Versions](#36-releasing-version
 1. Authenticate npm against GitHub Packages, e.g.
    `npm login --scope=@dimensiondev --auth-type=legacy --registry=https://npm.pkg.github.com`
    (username: your GitHub username, password: a classic PAT with the `write:packages` scope)
-2. Make a branch, run `yarn changeset version` and merge the changes into main
-3. Pull latest main, run `yarn build && yarn changeset publish`
+2. Make a branch, run `pnpm changeset version` and merge the changes into main
+3. Pull latest main, run `pnpm build && pnpm changeset publish`
 4. Push the generated tags with `git push origin --tags`
