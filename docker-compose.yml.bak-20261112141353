@@ -1,0 +1,42 @@
+name: shuttle
+
+x-shuttle: &shuttle
+  image: local/farcaster-shuttle:1.0.3
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file:
+    - .env
+  restart: unless-stopped
+  stop_grace_period: 30s
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+  # Snapchain serves shard_index 1 and 2 on this node; shuttle subscribes to one
+  # shard per process, so run one service per shard.
+  shuttle-1:
+    <<: *shuttle
+    environment:
+      SHARDS: "2"
+      SHARD_NUM: "1"
+
+  shuttle-2:
+    <<: *shuttle
+    environment:
+      SHARDS: "2"
+      SHARD_NUM: "2"
+
+  # Optional reconciliation worker (backfill queue consumer). Enable with:
+  #   docker compose --profile worker up -d
+  # Do NOT run `yarn start backfill` for the "only new events" requirement.
+  shuttle-worker:
+    <<: *shuttle
+    profiles: ["worker"]
+    environment:
+      SHARDS: "2"
+      SHARD_NUM: "1"
+    command: ["yarn", "start", "worker"]

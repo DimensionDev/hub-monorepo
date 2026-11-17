@@ -1,36 +1,33 @@
-# Production image for the shuttle example app, built from this repository.
+# syntax=docker/dockerfile:1
+#
+# Builds the shuttle sync worker from the pinned @farcaster/shuttle release.
+# The upstream package is a library; the example app in src/example-app is used
+# here as a runnable starting point. Copy that example into your own app when
+# you add a MessageHandler for business logic.
 ARG NODE_VERSION=24
 FROM node:${NODE_VERSION}-bookworm
 
-LABEL org.opencontainers.image.source="https://github.com/DimensionDev/hub-monorepo"
-LABEL org.opencontainers.image.description="Shuttle example app from the DimensionDev hub-monorepo"
-LABEL org.opencontainers.image.licenses="MIT"
+ARG HUB_MONOREPO_REF=@farcaster/shuttle@1.0.3
+ARG HUB_MONOREPO_URL=https://github.com/farcasterxyz/hub-monorepo.git
 
-# Build/runtime requirements: git is useful for dependency resolution, the rest
-# covers node-gyp and any native addons built during `yarn install`.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      git \
-      python3 \
-      make \
-      g++ \
-      ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends git python3 make g++ ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+RUN git clone --depth 1 --branch "${HUB_MONOREPO_REF}" "${HUB_MONOREPO_URL}" .
 
-# Build straight from the local checkout instead of cloning the repository.
-COPY . .
+# Same build order as the official quickstart:
+# packages/core -> packages/hub-nodejs -> packages/shuttle.
+RUN yarn install --frozen-lockfile \
+ && yarn --cwd packages/core build \
+ && yarn --cwd packages/hub-nodejs build \
+ && yarn --cwd packages/shuttle build
 
-# The official node image ships yarn classic, but bootstrap it if it is missing.
-RUN if ! command -v yarn >/dev/null 2>&1; then npm install -g yarn@1.22.19; fi \
-    && yarn install --frozen-lockfile \
-    && yarn --cwd packages/core build \
-    && yarn --cwd packages/hub-nodejs build \
-    && yarn --cwd packages/shuttle build
-
-# The shuttle start script is executed with tsx from `yarn start start`.
+# The upstream package's `start` script runs `tsx src/example-app/app.ts`, but
+# tsx is not a dependency of the shuttle package (the example app is not part of
+# the yarn workspace). Install it globally so `yarn start ...` resolves it.
 RUN npm install -g tsx@3.12.5
 
 WORKDIR /src/packages/shuttle
-
 CMD ["yarn", "start", "start"]
