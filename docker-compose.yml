@@ -1,10 +1,9 @@
 name: shuttle
 
 x-shuttle: &shuttle
-  image: local/farcaster-shuttle:projections-20261117
-  build:
-    context: .
-    dockerfile: Dockerfile
+  # Built on the server by scripts/deploy.sh and tagged with the git short sha.
+  # IMAGE_TAG lives in .env; roll back with `scripts/deploy.sh rollback <sha>`.
+  image: shuttle:${IMAGE_TAG:?set IMAGE_TAG in .env (see scripts/deploy.sh)}
   env_file:
     - .env
   restart: unless-stopped

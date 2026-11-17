@@ -46,30 +46,35 @@ Shuttle 直接在 `POSTGRES_URL` 指定的数据库、`POSTGRES_SCHEMA` 指定�
 
 ## 服务端
 
-Dockerfile 在本仓库内完整构建（core → hub-nodejs → shuttle），库代码和 example-app 的修改都会进入镜像。Compose 默认只运行 `shuttle-1`、`shuttle-2`。
+没有 CI 和镜像仓库。本地 `scripts/deploy.sh` 把指定提交的 `git archive` 上传到服务器 `/opt/shuttle/releases/<sha>`，在服务器上原生构建 `shuttle:<sha>`（`nice` 降低优先级，不抢 shard 的 CPU），再切换版本。Dockerfile 先根据各 workspace 的 `package.json` 和 `yarn.lock` 安装依赖，再复制源码构建，所以只改代码时会复用依赖层。新增 workspace 时要同步更新 Dockerfile 里的 manifest 列表。
 
 ```bash
-cd /opt/shuttle
-sudo docker compose build shuttle-1
-sudo docker compose up -d --no-deps --force-recreate shuttle-1 shuttle-2
-sudo docker compose logs --tail=50 shuttle-1 shuttle-2
+scripts/deploy.sh deploy            # 部署 HEAD，工作区必须没有未提交的修改
+scripts/deploy.sh deploy <ref>      # 部署指定提交
+scripts/deploy.sh status            # 当前 IMAGE_TAG、容器、保留的镜像和 release
+scripts/deploy.sh rollback <sha>    # 切回服务器上仍保留的旧镜像，不重新构建
 ```
+
+切换流程：
+
+1. 迁移守卫：目标镜像注册的迁移比当前镜像少时拒绝切换。迁移只能前进，跨迁移回滚需要 `--force` 并自行确认 schema 兼容。
+2. 从镜像内复制 `docker-compose.yml` 和 `scripts/*.sh` 到 `/opt/shuttle`，旧文件和 `.env` 备份到 `/opt/shuttle/backups/<时间>`。
+3. 把 `.env` 里的 `IMAGE_TAG` 改成新 sha，Compose 用 `shuttle:${IMAGE_TAG}`。
+4. 先重建 `shuttle-1`，等日志出现 `Starting stream consumer`（启动迁移已完成）再重建 `shuttle-2`。失败时停止，不动另一个 shard，也不自动回滚。
+5. 保留最近 `KEEP_RELEASES`（默认 3）个 release 和镜像，外加当前和上一个版本。
+
+每个 shard 只能有一个消费进程，部署时先停后启，不做蓝绿部署。脚本不修改 Redis 订阅位置。SSH 目标沿用 `SHUTTLE_SSH_HOST`、`SHUTTLE_SSH_IDENTITY`。
+
+首次使用脚本时，服务器 `.env` 还没有 `IMAGE_TAG`，旧版是在 `/opt/shuttle` 源码目录里构建的。脚本会用新的 compose 文件覆盖旧文件并重建两个 shard，旧源码文件可以确认无误后手动清理（保留 `.env`、`docker-compose.yml`、`scripts/`、`releases/`、`backups/`）。
 
 仅在首次启动空 Redis、且只需要从当前时刻同步时，运行一次 `sudo ./scripts/seed-last-event.sh`。日常重启不要再次运行，以免跳过停机期间的事件。
 
-`shuttle-watchdog.timer` 保持停用。worker 平时不启动，只在按下文步骤执行 backfill 时临时运行。升级后由两个现有 shard 进程执行启动迁移和 blocks 转换；保留原 Redis 订阅位置，不重新 seed。当前代码修改不会自动部署到服务器。
+`shuttle-watchdog.timer` 保持停用。worker 平时不启动，只在按下文步骤执行 backfill 时临时运行。升级后由两个现有 shard 进程执行启动迁移和 blocks 转换；保留原 Redis 订阅位置，不重新 seed。代码修改要提交后运行 `scripts/deploy.sh` 才会部署。
 
 ### 部署新版本并用 backfill 补 blocks
 
 1. 部署前检查 `onchain_events` 有没有内容不同的重复行（见上文 SQL）。第二列都等于 1 才能继续。
-2. 更新 `/opt/shuttle` 到新提交后重建镜像，再重启两个 shard 进程。迁移 006 由 shard 进程在启动时执行，`backfill` 命令不跑迁移，所以必须先完成这一步：
-
-```bash
-cd /opt/shuttle
-sudo docker compose build shuttle-1
-sudo docker compose up -d --no-deps --force-recreate shuttle-1 shuttle-2
-sudo docker compose logs --tail=50 shuttle-1 shuttle-2 | grep -i migration
-```
+2. 在本地运行 `scripts/deploy.sh deploy`。迁移 006 由 shard 进程在启动时执行，`backfill` 命令不跑迁移，所以必须先完成这一步。脚本会打印执行过的迁移。之后在服务器 `/opt/shuttle` 下执行以下步骤：
 
 3. 先用少量 fid 试跑只补投影的 backfill。`BACKFILL_PROJECTIONS_ONLY=true` 表示只向节点拉取投影需要的消息族（blocks 对应 link 消息和 compact），没有投影关心的消息（例如 follow）不写库，每个 fid 在一个事务里只重算一次：
 
