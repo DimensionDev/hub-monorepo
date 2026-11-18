@@ -1581,3 +1581,18 @@ h1 {
 .stat-list span,.count-cell div,.run-cell .muted {white-space:nowrap;}
 .table-wrap {overflow-x:auto;}
 .panel .table-wrap table.overview-table,.panel .table-wrap table.records-table {min-width:720px;}
+
+/* business table roadmap */
+.roadmap-stack {display:grid;gap:18px;}
+.roadmap-group .panel-heading h2 {display:flex;align-items:center;gap:10px;}
+.roadmap-group .group-count {font-size:12px;font-weight:500;color:var(--text-secondary);}
+.roadmap-table td {vertical-align:top;}
+.roadmap-table .source-cell {min-width:180px;max-width:280px;font-size:12.5px;color:var(--text-secondary);}
+.roadmap-table .note-cell {min-width:220px;max-width:380px;font-size:12.5px;line-height:1.55;}
+.roadmap-table .note-cell .stat-list {margin-top:6px;}
+.prereq-list {margin:0;padding-left:16px;font-size:12px;color:var(--text-secondary);line-height:1.55;min-width:150px;}
+.doc-cell {white-space:nowrap;}
+.doc-link {display:inline-block;margin:0 6px 4px 0;padding:1px 7px;border-radius:5px;font-size:11.5px;font-variant-numeric:tabular-nums;color:var(--primary);background:var(--primary-soft);text-decoration:none;}
+.doc-link:hover {text-decoration:underline;}
+.roadmap-table tbody tr[data-projection] {cursor:pointer;}
+.roadmap-table tbody tr[data-projection]:hover {background:var(--row-hover);}
