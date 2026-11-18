@@ -41,10 +41,11 @@ type AccountEvent = {
 
 type Body = { eventType: number; from?: string; to?: string; recoveryAddress?: string };
 
+/** `registeredAt` is null (and `recovery` may be) for a partial account: the REGISTER is missing. */
 export type Account = {
   custody: Buffer;
-  recovery: Buffer;
-  registeredAt: Date;
+  recovery: Buffer | null;
+  registeredAt: Date | null;
   timestamp: Date;
 };
 
@@ -117,7 +118,7 @@ function sameEvent(a: AccountEvent, b: AccountEvent): boolean {
 export type CustodyGap = { blockNumber: number; logIndex: number; expectedFrom: string; actualFrom: string };
 
 export type Reduced =
-  | { kind: "account"; account: Account; gaps: CustodyGap[] }
+  | { kind: "account"; account: Account; gaps: CustodyGap[]; missingFields: string[] }
   | { kind: "pending"; missingFields: string[] };
 
 /**
@@ -125,12 +126,17 @@ export type Reduced =
  * REGISTER to the same custody is a re-registration (it moves recovery and `timestamp`, never
  * `registered_at`). A transfer that does not continue the current custody means an event is
  * missing: the chain is authoritative, so the transfer is applied and the gap reported.
- * Recovery changes do not move `timestamp`. Without a REGISTER the account is pending and nothing
- * is guessed.
+ * Recovery changes do not move `timestamp`.
+ *
+ * Without a REGISTER (snapchain misses a few), transfers still give a partial account: custody and
+ * `timestamp` from the transfers, recovery from the latest recovery change or null, and
+ * `registered_at` null; `missingFields` lists what is unknown. With no transfer either there is no
+ * custody, and the fid is pending.
  */
 export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
   const events = [...input].sort(position);
   let account: Account | undefined;
+  let recoveryBeforeTransfer: Buffer | null = null;
   const gaps: CustodyGap[] = [];
   const seen = new Set<number>();
   for (const [i, e] of events.entries()) {
@@ -149,7 +155,7 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
     switch (body.eventType) {
       case IdRegisterEventType.REGISTER:
         if (account) {
-          if (!(address(body.to) as Buffer).equals(account.custody))
+          if (account.registeredAt === null || !(address(body.to) as Buffer).equals(account.custody))
             return err(new HubError("bad_request.conflict", "Inconsistent registration history"));
           account.recovery = address(body.recoveryAddress) as Buffer;
           account.timestamp = e.blockTimestamp;
@@ -164,7 +170,15 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
         };
         break;
       case IdRegisterEventType.TRANSFER:
-        if (!account) break;
+        if (!account) {
+          account = {
+            custody: address(body.to) as Buffer,
+            recovery: recoveryBeforeTransfer,
+            registeredAt: null,
+            timestamp: e.blockTimestamp,
+          };
+          break;
+        }
         if (!(address(body.from) as Buffer).equals(account.custody)) {
           gaps.push({
             blockNumber: e.blockNumber,
@@ -178,13 +192,17 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
         break;
       case IdRegisterEventType.CHANGE_RECOVERY:
         if (account) account.recovery = address(body.recoveryAddress) as Buffer;
+        else recoveryBeforeTransfer = address(body.recoveryAddress) as Buffer;
         break;
     }
   }
-  if (account) return ok({ kind: "account", account, gaps });
-  const missingFields = ["registered_at"];
-  if (!seen.has(IdRegisterEventType.TRANSFER)) missingFields.push("custody_address", "timestamp");
-  if (!seen.has(IdRegisterEventType.CHANGE_RECOVERY)) missingFields.push("recovery_address");
+  const missingFields: string[] = [];
+  if (!seen.has(IdRegisterEventType.REGISTER)) {
+    missingFields.push("registered_at");
+    if (!account) missingFields.push("custody_address", "timestamp");
+    if (!seen.has(IdRegisterEventType.CHANGE_RECOVERY)) missingFields.push("recovery_address");
+  }
+  if (account) return ok({ kind: "account", account, gaps, missingFields });
   return ok({ kind: "pending", missingFields });
 }
 
@@ -260,14 +278,18 @@ export async function projectFid(
   const reduced = reduceAccount(await loadEvents(db, fid));
   if (reduced.isErr()) return fail(reduced.error);
   if (reduced.value.kind === "pending") {
-    // Never guess an account; an existing row (e.g. repaired from Neynar) is left as it is.
+    // No custody to write; an existing row (e.g. repaired from Neynar) is left as it is.
     await setFidIssue(db, fid, "pending", { missingFields: reduced.value.missingFields });
     return "pending";
   }
 
-  const { account, gaps } = reduced.value;
-  // A gap is reported, not fatal: the row still follows the chain.
-  const settle = () => setFidIssue(db, fid, gaps.length ? "gap" : null, gaps.length ? { gaps } : undefined);
+  const { account, gaps, missingFields } = reduced.value;
+  // Gaps and a missing REGISTER are reported, not fatal: the row still follows the chain.
+  const settle = () => {
+    if (missingFields.length)
+      return setFidIssue(db, fid, "pending", gaps.length ? { missingFields, gaps } : { missingFields });
+    return setFidIssue(db, fid, gaps.length ? "gap" : null, gaps.length ? { gaps } : undefined);
+  };
   const row = existing[0];
   const now = new Date().toISOString();
   if (!row) {
@@ -281,7 +303,7 @@ export async function projectFid(
         custodyAddress: account.custody,
         recoveryAddress: account.recovery,
         timestamp: account.timestamp.toISOString(),
-        registeredAt: account.registeredAt.toISOString(),
+        registeredAt: account.registeredAt?.toISOString() ?? null,
       })
       .execute();
     await settle();
@@ -296,12 +318,14 @@ export async function projectFid(
     return "stale";
   }
   await settle();
+  // A partial account never clears what the row already knows.
+  const recovery = account.recovery ?? row.recoveryAddress;
+  const registeredAt = account.registeredAt ?? row.registeredAt;
   if (
     sameBytes(row.custodyAddress, account.custody) &&
-    sameBytes(row.recoveryAddress, account.recovery) &&
+    sameBytes(row.recoveryAddress, recovery) &&
     row.timestamp.getTime() === account.timestamp.getTime() &&
-    row.registeredAt !== null &&
-    row.registeredAt.getTime() === account.registeredAt.getTime()
+    row.registeredAt?.getTime() === registeredAt?.getTime()
   ) {
     return "unchanged";
   }
@@ -309,9 +333,9 @@ export async function projectFid(
     .updateTable("fids")
     .set({
       custodyAddress: account.custody,
-      recoveryAddress: account.recovery,
+      recoveryAddress: recovery,
       timestamp: account.timestamp.toISOString(),
-      registeredAt: account.registeredAt.toISOString(),
+      registeredAt: registeredAt?.toISOString() ?? null,
       updatedAt: now,
     })
     .where("id", "=", row.id)

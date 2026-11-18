@@ -275,13 +275,24 @@ integration("reference tables and fids projection", () => {
       expect(await account()).toEqual(before);
     });
 
-    test("without a REGISTER the fid is pending until the registration arrives", async () => {
+    test("without a REGISTER transfers give a partial row until the registration arrives", async () => {
       await deliver(transfer(200, 1, 3));
-      expect(await account()).toBeUndefined();
+      expect(await account()).toMatchObject({
+        custody: hex(3),
+        recovery: null,
+        timestamp: at(200),
+        registeredAt: null,
+      });
       expect(await issues()).toEqual([
         { fid: FID, reason: FID_ISSUES.pending, payload: { missingFields: ["registered_at", "recovery_address"] } },
       ]);
       await deliver(changeRecovery(300, 4));
+      expect(await account()).toMatchObject({
+        custody: hex(3),
+        recovery: hex(4),
+        timestamp: at(200),
+        registeredAt: null,
+      });
       expect(await issues()).toEqual([
         { fid: FID, reason: FID_ISSUES.pending, payload: { missingFields: ["registered_at"] } },
       ]);
@@ -291,7 +302,19 @@ integration("reference tables and fids projection", () => {
       expect(await issues()).toEqual([]);
     });
 
-    test("a pending fid never touches an existing (e.g. Neynar-repaired) row", async () => {
+    test("only a recovery change gives no custody, so the fid stays pending without a row", async () => {
+      await deliver(changeRecovery(50, 6));
+      expect(await account()).toBeUndefined();
+      expect(await issues()).toEqual([
+        {
+          fid: FID,
+          reason: FID_ISSUES.pending,
+          payload: { missingFields: ["registered_at", "custody_address", "timestamp"] },
+        },
+      ]);
+    });
+
+    test("a partial account moves custody but never clears what an existing row knows", async () => {
       const now = new Date().toISOString();
       await appDb()
         .insertInto("fids")
@@ -306,10 +329,20 @@ integration("reference tables and fids projection", () => {
           registeredAt: at(10).toISOString(),
         })
         .execute();
-      const before = await account();
       await deliver(transfer(200, 9, 3));
-      expect(await account()).toEqual(before);
+      expect(await account()).toMatchObject({
+        custody: hex(3),
+        recovery: hex(8),
+        timestamp: at(200),
+        registeredAt: at(10),
+      });
       expect((await issues()).map((i) => i.reason)).toEqual([FID_ISSUES.pending]);
+    });
+
+    test("a REGISTER after a transfer is still an inconsistent history", async () => {
+      await deliver(transfer(50, 1, 1));
+      await deliver(register(100, 1, 2));
+      expect((await issues()).map((i) => i.reason)).toEqual([FID_ISSUES.invalid]);
     });
 
     test("a stored row newer than the on-chain history is not moved backwards", async () => {
