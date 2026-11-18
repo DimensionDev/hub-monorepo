@@ -1,4 +1,5 @@
 import pg from "pg";
+import { log } from "../log";
 import {
   CamelCasePlugin,
   WithSchemaPlugin,
@@ -253,12 +254,17 @@ export interface HubTables {
 }
 
 export const getDbClient = (connectionString?: string, schema = "public") => {
+  const pool = new Pool({
+    max: 10,
+    connectionString,
+  });
+  // An idle client the server drops (restart, failover, pg_terminate_backend) is emitted here;
+  // without a listener the error is unhandled and takes the process down. The pool has already
+  // discarded the client, and the next query opens a new connection.
+  pool.on("error", (error) => log.warn({ error }, "Idle Postgres client error"));
   return new Kysely<HubTables>({
     dialect: new PostgresDialect({
-      pool: new Pool({
-        max: 10,
-        connectionString,
-      }),
+      pool,
       cursor: Cursor,
     }),
     plugins: [new CamelCasePlugin(), new WithSchemaPlugin(schema)],

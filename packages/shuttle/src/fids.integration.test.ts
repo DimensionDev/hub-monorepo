@@ -22,6 +22,7 @@ import { MessageReconciliation } from "./shuttle/messageReconciliation";
 import { OnChainEventReconciliation } from "./shuttle/onChainEventReconciliation";
 import { log } from "./log";
 import { DB, getDbClient, HubEventProcessor } from "./shuttle";
+import { dropTestDatabase } from "./testDatabase";
 import { bytesToHex } from "./utils";
 
 // Never fall back to the application's production connection or dotenv configuration.
@@ -49,7 +50,7 @@ integration("reference tables and fids projection", () => {
   afterAll(async () => {
     await db?.destroy();
     if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+      await dropTestDatabase(admin, database);
       await admin.end();
     }
   });

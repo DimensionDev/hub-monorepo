@@ -18,6 +18,7 @@ import { backfillFidForProjections, ProjectionDispatcher, projections } from "./
 import { MessageReconciliation } from "./shuttle/messageReconciliation";
 import { log } from "./log";
 import { DB, getDbClient, HubEventProcessor } from "./shuttle";
+import { dropTestDatabase } from "./testDatabase";
 import { MessageProcessor } from "./shuttle/messageProcessor";
 import type { AppDb } from "./example-app/db";
 import { recordBackfillJob, runRebuild } from "./example-app/projections/runs";
@@ -49,7 +50,7 @@ integration("projection framework", () => {
   afterAll(async () => {
     await db?.destroy();
     if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+      await dropTestDatabase(admin, database);
       await admin.end();
     }
   });

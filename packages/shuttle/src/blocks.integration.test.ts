@@ -6,6 +6,7 @@ import { App } from "./example-app/app";
 import { migrateToLatest } from "./example-app/db";
 import { log } from "./log";
 import { DB, getDbClient, HubEventProcessor } from "./shuttle";
+import { dropTestDatabase } from "./testDatabase";
 import { MessageProcessor } from "./shuttle/messageProcessor";
 
 // Never fall back to the application's production connection or dotenv configuration.
@@ -34,7 +35,7 @@ integration("blocks incremental projection", () => {
   afterAll(async () => {
     await db?.destroy();
     if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+      await dropTestDatabase(admin, database);
       await admin.end();
     }
   });
