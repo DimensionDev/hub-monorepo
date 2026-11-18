@@ -59,7 +59,11 @@ export function onChainEventBody(onChainEvent: OnChainEvent): OnChainEventBodyJs
  */
 export async function storeOnChainEvent(event: HubEvent, txn: DB): Promise<boolean> {
   if (!isMergeOnChainHubEvent(event)) return false;
-  const onChainEvent = event.mergeOnChainEventBody.onChainEvent;
+  return storeOnChainEventRow(event.mergeOnChainEventBody.onChainEvent, txn);
+}
+
+/** Stores one on-chain event idempotently. Returns false for event types without a body mapping. */
+export async function storeOnChainEventRow(onChainEvent: OnChainEvent, txn: DB): Promise<boolean> {
   const body = onChainEventBody(onChainEvent);
   if (body === undefined) return false;
   const inserted = await (txn as unknown as AppDb)

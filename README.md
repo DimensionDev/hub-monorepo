@@ -13,7 +13,7 @@
 - `shuttle_projection_issues`（投影遇到的数据缺口，例如非 mainnet 消息；重放不重复记录）
 - `kysely_migration`、`kysely_migration_lock`（迁移元数据）
 
-`pgcrypto` 扩展和 `generate_ulid()` 函数用于生成主键。`casts`、`usernames` 的示例迁移不在启动迁移列表内，消息处理也不写入 casts 投影。可选用户名重建器的测试会在独立测试数据库中创建自己的测试表。
+`pgcrypto` 扩展和 `generate_ulid()` 函数用于生成主键。业务表（含 `usernames`、`casts` 等）由迁移 008 按 reference 结构建好；旧的 `casts` 示例迁移和 username proof 原始表（`username_proofs`，迁移 004）不在启动迁移列表内，消息处理也不写入 casts 投影。可选用户名重建器的测试会在独立测试数据库中创建自己的测试表。
 
 ### 业务投影框架
 
@@ -156,11 +156,11 @@ pnpm --dir packages/core build && pnpm --dir packages/hub-nodejs build && pnpm -
 
 Shuttle 集成测试会重建 `shuttle_test` 数据库并清空测试 Redis。只使用隔离的本地测试实例，禁止使用服务器 `.env` 或 `.env.development` 运行测试。
 
-blocks 和投影框架集成测试（`src/blocks.integration.test.ts`、`src/projections.integration.test.ts`）只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
+blocks、fids 和投影框架集成测试（`src/blocks.integration.test.ts`、`src/fids.integration.test.ts`、`src/projections.integration.test.ts`）只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
 
 ```bash
 cd packages/shuttle
 TEST_DATABASE_URL='postgres://shuttle@127.0.0.1:55441/postgres' \
   NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules \
-  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts src/projections.integration.test.ts --runInBand
+  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts src/fids.integration.test.ts src/projections.integration.test.ts --runInBand
 ```

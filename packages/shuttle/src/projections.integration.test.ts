@@ -23,7 +23,7 @@ import type { AppDb } from "./example-app/db";
 import { recordBackfillJob, runRebuild } from "./example-app/projections/runs";
 import { enqueueBackfill } from "./example-app/worker";
 import { getStatus, listIssues, listRuns } from "./example-app/dashboard/status";
-import { recordIssue } from "./example-app/projections/issues";
+import { messageSubject, recordIssue } from "./example-app/projections/issues";
 
 // Never fall back to the application's production connection or dotenv configuration.
 const testUrl = process.env["TEST_DATABASE_URL"];
@@ -246,7 +246,10 @@ integration("projection framework", () => {
 
     // Idempotent: nothing changes, including updated_at.
     const before = (await sql`SELECT id, updated_at FROM public.blocks ORDER BY id`.execute(db)).rows;
-    expect(await dispatcher.rebuild(db, { fids: [101, 100] })).toEqual({ rebuilt: 2, failed: [] });
+    expect(await dispatcher.rebuild(db, { projections: ["blocks"], fids: [101, 100] })).toEqual({
+      rebuilt: 2,
+      failed: [],
+    });
     expect((await sql`SELECT id, updated_at FROM public.blocks ORDER BY id`.execute(db)).rows).toEqual(before);
 
     await expect(dispatcher.rebuild(db, { projections: ["casts"] })).rejects.toThrow("Unknown projections: casts");
@@ -314,7 +317,9 @@ integration("projection framework", () => {
       await sql`DROP TABLE IF EXISTS public.shuttle_message_state`.execute(db);
       // Later migrations are idempotent and must be re-run after the ones reopened here.
       await sql`DELETE FROM public.kysely_migration
-        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs')`.execute(db);
+        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs', '008_reference_tables')`.execute(
+        db,
+      );
     };
 
     await reopen();
@@ -340,7 +345,7 @@ integration("projection framework", () => {
 
     test("rebuild records a succeeded run, then a failed one for invalid stored data", async () => {
       for (const message of history) await MessageProcessor.storeMessage(message, db, "merge", undefined, false);
-      const ok = await runRebuild(db, dispatcher, { projections: [], fids: [], trigger: "cli" });
+      const ok = await runRebuild(db, dispatcher, { projections: ["blocks"], fids: [], trigger: "cli" });
       expect(ok.rebuilt).toBe(1);
       const foreign = Message.create({
         data: {
@@ -430,7 +435,7 @@ integration("projection framework", () => {
         });
       await dispatcher.processEvent(mergeEvent(10, bad(100, 20)), db);
       await dispatcher.processEvent(mergeEvent(11, bad(102, 21)), db);
-      await recordIssue(appDb(), "blocks", bad(103, 22), "Another reason");
+      await recordIssue(appDb(), "blocks", messageSubject(bad(103, 22)), "Another reason");
 
       const status = await getStatus({ db: appDb(), schema: "public", projections, redis: null, queue: null });
       expect(status.migrations).toMatchObject({ ok: true, data: { pending: [] } });

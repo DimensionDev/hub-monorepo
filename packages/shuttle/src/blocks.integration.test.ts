@@ -423,7 +423,9 @@ integration("blocks incremental projection", () => {
     const reopenMigration = async () => {
       await sql`DROP TABLE public.shuttle_message_state`.execute(db);
       await sql`DELETE FROM public.kysely_migration
-        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs')`.execute(db);
+        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs', '008_reference_tables')`.execute(
+        db,
+      );
     };
     await reopenMigration();
     await sql`DROP INDEX public.blocks_updated_at_idx`.execute(db);

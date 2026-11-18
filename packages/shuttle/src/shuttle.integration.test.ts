@@ -1,6 +1,6 @@
 import { migrateToLatest } from "./example-app/db";
 import { App } from "./example-app/app";
-import { up as createUsernameFixture } from "./example-app/migrations/004_usernames";
+import { up as createUsernameFixture } from "./example-app/migrations/004_username_proofs";
 import { log } from "./log";
 import { sql } from "kysely";
 import {
@@ -43,6 +43,7 @@ import {
 } from "@dimensiondev/hub-nodejs";
 import { err, ok } from "neverthrow";
 import { bytesToHex, MESSAGE_TYPE_KEY_ADD, MESSAGE_TYPE_KEY_REMOVE } from "./utils";
+import { referenceTables } from "./example-app/reference/schema";
 
 let db: DB;
 let subscriber: FakeHubSubscriber;
@@ -139,17 +140,20 @@ afterAll(async () => {
 });
 
 describe("shuttle", () => {
-  test("migrations create raw capture, blocks projection and migration metadata tables", () => {
-    expect(initialTables).toEqual([
-      "blocks",
-      "kysely_migration",
-      "kysely_migration_lock",
-      "messages",
-      "onchain_events",
-      "shuttle_message_state",
-      "shuttle_projection_issues",
-      "shuttle_projection_runs",
-    ]);
+  test("migrations create raw capture, business tables and migration metadata tables", () => {
+    expect(initialTables).toEqual(
+      [
+        "blocks",
+        "kysely_migration",
+        "kysely_migration_lock",
+        "messages",
+        "onchain_events",
+        "shuttle_message_state",
+        "shuttle_projection_issues",
+        "shuttle_projection_runs",
+        ...referenceTables.map((t) => t.name),
+      ].sort(),
+    );
   });
 
   beforeEach(() => {
@@ -1175,7 +1179,7 @@ describe("shuttle", () => {
     }
 
     beforeEach(async () => {
-      await db.deleteFrom("usernames").where("fid", "=", fid).execute();
+      await db.deleteFrom("username_proofs").where("fid", "=", fid).execute();
     });
 
     test("hub proof present in DB by readable username is detected (regression: IN-clause used hex bytes)", async () => {
@@ -1184,7 +1188,7 @@ describe("shuttle", () => {
 
       // The DB stores the readable username, not the hex of the protobuf bytes.
       await db
-        .insertInto("usernames")
+        .insertInto("username_proofs")
         .values({
           fid,
           username: "alice",
@@ -1218,7 +1222,7 @@ describe("shuttle", () => {
     test("DB row missing from hub is reported with missingInHub=true when onDbProof is provided", async () => {
       const ownerHex = `0x${"22".repeat(20)}`;
       await db
-        .insertInto("usernames")
+        .insertInto("username_proofs")
         .values({
           fid,
           username: "carol",

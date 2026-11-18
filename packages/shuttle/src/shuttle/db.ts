@@ -226,8 +226,9 @@ export type OnChainEventsTable = {
 export type OnChainEventRow = Selectable<OnChainEventsTable>;
 export type InsertableOnChainEventRow = Insertable<OnChainEventsTable>;
 
-// USERNAMES --------------------------------------------------------------------------------------
-export type UsernamesTable = {
+// USERNAME PROOFS --------------------------------------------------------------------------------
+// Raw username proofs. The table is `username_proofs`; `usernames` is the business table name.
+export type UsernameProofsTable = {
   id: Generated<string>;
   createdAt: Generated<Date>;
   updatedAt: Generated<Date>;
@@ -239,14 +240,16 @@ export type UsernamesTable = {
   type: UserNameType;
 };
 
-export type UsernameRow = Selectable<UsernamesTable>;
-export type InsertableUsernameRow = Insertable<UsernamesTable>;
+/** @deprecated Renamed to UsernameProofsTable (the table is now `username_proofs`). */
+export type UsernamesTable = UsernameProofsTable;
+export type UsernameRow = Selectable<UsernameProofsTable>;
+export type InsertableUsernameRow = Insertable<UsernameProofsTable>;
 
 // ALL TABLES -------------------------------------------------------------------------------------
 export interface HubTables {
   messages: MessagesTable;
   onchain_events: OnChainEventsTable;
-  usernames: UsernamesTable;
+  username_proofs: UsernameProofsTable;
 }
 
 export const getDbClient = (connectionString?: string, schema = "public") => {

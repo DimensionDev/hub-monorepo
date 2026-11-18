@@ -1,6 +1,6 @@
 import { HubError } from "@dimensiondev/hub-nodejs";
 import type { AppDb } from "../db";
-import type { ProjectionSource, RawChange } from "./types";
+import type { MessageChange, ProjectionSource } from "./types";
 
 /**
  * Decides whether a projected message's lifecycle change may be applied, so that replays,
@@ -10,7 +10,7 @@ import type { ProjectionSource, RawChange } from "./types";
  * - backfill: insert-only. A message that already has a state row or a stored row is left
  *   alone; backfill never revives a deleted/pruned/revoked message.
  */
-export async function shouldApply(db: AppDb, change: RawChange, source: ProjectionSource): Promise<boolean> {
+export async function shouldApply(db: AppDb, change: MessageChange, source: ProjectionSource): Promise<boolean> {
   const fid = change.message.data?.fid;
   if (!fid) throw new HubError("bad_request.validation_failure", "Missing message fid");
   const previous = await db
@@ -34,7 +34,7 @@ export async function shouldApply(db: AppDb, change: RawChange, source: Projecti
   return previous.eventId < source.eventId;
 }
 
-export async function recordState(db: AppDb, change: RawChange, source: ProjectionSource): Promise<void> {
+export async function recordState(db: AppDb, change: MessageChange, source: ProjectionSource): Promise<void> {
   const fid = change.message.data?.fid;
   if (!fid) throw new HubError("bad_request.validation_failure", "Missing message fid");
   const state =

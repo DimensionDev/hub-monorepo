@@ -1,6 +1,6 @@
-# Shuttle 内联业务投影（一期：框架 + blocks）
+# Shuttle 内联业务投影
 
-Status: 现行设计。一期范围是通用投影框架，以及把现有 blocks 迁进框架。
+Status: 现行设计。一期：通用投影框架 + blocks。二期：一次性建好全部业务表（迁移 008）、dispatcher 支持链上事件、fids 投影与 ID_REGISTER 链上补齐。
 
 ## 背景
 
@@ -54,11 +54,17 @@ projections/
   issues.ts       数据缺口写 shuttle_projection_issues（不抛异常）
   ids.ts          确定性 UUIDv5
   blocks.ts       blocks 投影
-  index.ts        注册表：projections = [blocksProjection]
+  fids.ts         fids 投影（onchain_events 的 ID_REGISTER）
+  backfill.ts     只补投影的 backfill（消息 + 链上事件）
+  index.ts        注册表：projections = [blocksProjection, fidsProjection]
 raw/
   onchainEvents.ts  onchain_events 原始落库（幂等）
+reference/
+  schema.ts       reference 库业务表结构（从 reference catalog 读取，不手改）
+  adopt.ts        按 schema.ts 建表，或校验并接管已有表、补缺失索引
 migrations/
   006_projection_framework.ts
+  008_reference_tables.ts
 ```
 
 `ids.ts` 的规则：blocks 用 DNS 命名空间，名字为 `farcaster:mainnet:block:<a>:<b>`；其余表用 URL 命名空间，名字为 `farcaster-db-conversion:<table>:<key>`。生成结果与 Go 实现逐字节一致，已有行的 id 不会变。
@@ -71,7 +77,9 @@ type ProjectionSource =
   | { kind: "event"; shardIndex: number; eventId: number; eventTimestamp: Date }
   | { kind: "backfill" };
 
-type RawChange = { kind: "message"; message: Message; operation: StoreMessageOperation };
+type RawChange =
+  | { kind: "message"; message: Message; operation: StoreMessageOperation }
+  | { kind: "onchain"; event: OnChainEvent }; // 链上事件不可变，只有 merge
 
 type ProjectionContext = { db: AppDb; schema: string; source: ProjectionSource };
 
@@ -101,6 +109,10 @@ interface Projection {
    - 通过校验后过生命周期守卫 `shouldApply`。通过则 `storeMessage`；如果是非 merge 的 event，再把 `deleted_at` / `pruned_at` / `revoked_at` 设为 hub 事件时间（不用墙钟时间，保证可复现）。最后 `recordState`。
 5. 按投影收集已接受的变更，依次调用 `projection.apply`。
 6. 返回 `true`，跳过通用处理。
+
+### 链上变更
+
+`MERGE_ON_CHAIN_EVENT` 展开为 `onchain` 变更，锁 `event.fid`。链上事件不可变、原始落库按 `(chain_id, block_number, log_index)` 幂等，所以**不过生命周期守卫**，也不要求 hub event id（id 只用于给消息生命周期排序）。投影 `validate` 全部拒绝时同样写 issue 且不入库；没有投影感兴趣的链上事件仍由 `app.onHubEvent → storeOnChainEvent` 通用落库。backfill 用 `processMissingOnChainEvents` 一批一个事务。
 
 ## 生命周期守卫：event 与 backfill
 
@@ -157,10 +169,39 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 - `messages` 已有 `UNIQUE(hash)`，不需要改。
 - `onchain_events`：迁移 006 先检查 `(chain_id, block_number, log_index)` 的重复行。如果同一位置的内容（`type, fid, tx_hash, body`）不一致，迁移直接失败并列出这些位置，交人工处理；内容一致的重复只保留最小 id 的一行。之后建唯一索引 `onchain_events_chain_block_log_unique`。插入改为 `ON CONFLICT DO NOTHING`，逻辑在 `raw/onchainEvents.ts`。
 
+## 业务表结构：迁移 008
+
+用户要求一次性建好要转换的表，后续投影只加逻辑、不再改结构。迁移 008 按 `reference/schema.ts` 处理 17 张表：casts、channel_follows、channel_members、channels、fids、follow_counts、follows、neynar_user_scores、profile_external_accounts、profiles、reactions、signers、storage_rentals、tier_purchases、user_labels、usernames、verifications。
+
+- `schema.ts` 于 2026-11-17 从 reference 库（Neynar replicator，PG 17.9）catalog 只读导出：列（类型、NOT NULL、默认值，按 attnum 顺序）与全部 `pg_indexes.indexdef`。
+- 表不存在：按 reference 建表（`<table>_pkey`）和全部索引。表已存在：列、约束、索引须与 reference 完全一致（索引按 indexdef 文本比较，含 INCLUDE / WHERE / WITH），缺失索引补建；多余列/索引或类型不同直接报错，不删不改已有数据。`fids`、`signers` 允许旧 Go 修复加的 `neynar_backfilled boolean NOT NULL DEFAULT false`。
+- casts 的 trigram 索引需要 `pg_trgm`：008 先 `CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public`（trusted 扩展，库级 CREATE 权限即可），opclass 按扩展所在 schema 限定。
+- **未包含**：blocks（005 负责）；`parquet_import_tracking`（Neynar 导入记账，无数据源）。
+- shuttle 自己的 username proof 原始表原来也叫 `usernames`，与 reference 业务表重名且结构不同，已改名为 `username_proofs`（`HubTables.username_proofs`，迁移文件 `004_username_proofs.ts`）。004 没有注册进应用迁移、生产库也没有这张表，所以只是代码改名，不需要数据迁移。
+- 生产 shuttle 库（`replicator`，PG 18.6）2026-11-17 只读核对：除 blocks 外没有业务表，008 在生产是全新建表。
+
+## fids 投影
+
+规则来自 [000008](000008_fids-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) 和 Go `initfids/model.go` 的 `reduce`：
+
+- 只关心 `type=3`（ID_REGISTER）。每次 apply 对涉及的 fid **从 `onchain_events` 全量重算**；原始链上事件只增不改，结果与到达顺序无关，不需要 Go 的 `conversion_state.fids` 水位。
+- 校验（逐事件，新到事件和已存行都过）：chain_id=10；0 < fid ≤ 2^31-1；eventType 1/2/3 及各自必需的 20 字节地址；tx hash 32 字节。
+- 按 `(block_number, log_index)` 排序；同位置内容相同去重，不同报冲突。REGISTER 必须是第一条且唯一；TRANSFER 的 from 必须等于当前 custody，更新 custody 与 timestamp，保留 recovery；CHANGE_RECOVERY 只改 recovery，不改 timestamp。
+- 写入：`id = conversionId("fids", fid)`（与 Go 一致）；业务字段有变化才更新 `updated_at`。
+- 没有 REGISTER：pending，**不建行、不动已有行**，写 issue `missing REGISTER`（payload `missingFields`）。已有行 timestamp 晚于重算结果：不回退，写 issue `stored account is newer than the on-chain history`。历史不一致（冲突、转移链断、REGISTER 不在首位）：实时/backfill 写 issue `invalid account history` 并照常提交（原始事件不丢），`rebuild` 则抛错计为失败。
+- fid 级 issue 用确定性 hash `sha1("fids:<fid>")[0:20]`，每个 fid 同时最多一条，状态变化时替换或清除。
+- 状态页 stats：`total`、`pending`。
+
+### ID_REGISTER 链上补齐
+
+`Projection.onChainReconcileTypes` 声明需要的链上事件类型（fids 为 `EVENT_TYPE_ID_REGISTER`）。只补投影的 backfill 和全量 backfill 都会对每个 fid 调 `OnChainEventReconciliation`，把库里缺的事件交给 `processMissingOnChainEvents`。生产 `onchain_events` 只有 59 条 ID_REGISTER（58 个 fid），大部分 fid 缺 REGISTER，必须靠这一步补齐。
+
+上线顺序：部署（008 建表）→ `rebuild` REBUILD_PROJECTIONS=fids → 只补投影的 backfill（`BACKFILL_PROJECTIONS_ONLY=true`）→ 抽样与 reference.fids 核对。
+
 ## 增加一张新业务表
 
 1. 先读对应的旧文档（例如 [000008 fids](000008_fids-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)），只取业务规则章节，即字段口径、业务主键、冲突与缺口处理。
-2. 在 `example-app/migrations/` 下加迁移，表结构和索引以 reference 为准；在 `example-app/db.ts` 注册迁移，并更新 `AppTables`。
+2. 表已由迁移 008 建好，只需在 `example-app/db.ts` 的 `AppTables` 加上该表的类型。
 3. 在 `projections/` 下新建 `<table>.ts`，实现 `Projection`：
    - `interestedIn`：只认该表需要的消息类型，尽量窄。
    - `validate`：可预期的数据问题返回 err，由 dispatcher 写 issue，不要抛异常。
@@ -168,7 +209,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
    - `table` / `stats`（可选）：业务表名和几项便宜的计数（如 `total`、`active`），状态页会显示。
 4. 在 `projections/index.ts` 的 `projections` 数组里注册。
 5. 写集成测试，至少覆盖：同一组事件打乱顺序、批内并发、全部改走 backfill 后结果一致；revoke 之后再 backfill 旧 merge 不会复活；校验失败写 issue 且事务提交。
-6. 如果数据来自 `onchain_events` 或用户名证明，dispatcher 目前只处理 message 类变更，需要先扩展 `RawChange`（见下文“下一期”）。
+6. 数据来自 `onchain_events` 时用 `onchain` 变更并声明 `onChainReconcileTypes`（参考 fids）；用户名证明还未接入 dispatcher。
 
 ## Cutover 与 backfill
 
@@ -209,11 +250,9 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 
 | 项 | 说明 | 旧文档 |
 |---|---|---|
-| fids | 来自 `onchain_events` 的 ID_REGISTER；需要让 dispatcher 支持 onchain 变更 | [000008](000008_fids-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000014](000014_Neynar%E8%A1%A5%E9%BD%90FID.md) |
 | signers | 链上 KEY 事件；`app_fid` 归属的跨表重算策略待定；gasless 路径另行分析 | [000010](000010_signers-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000015](000015_Neynar%E8%A1%A5%E9%BD%90signers.md)、[000016](000016_signers%E5%92%8Ccustody_address%E7%9A%84%E5%8C%BA%E5%88%AB.md) |
-| usernames | 先做 username proof 原始落库，再接入 UsernameProof reconciliation | [000011](000011_usernames-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000017](000017_usernames%E8%BD%AC%E6%8D%A2%E4%B8%8Ereference%E6%A0%A1%E9%AA%8C.md) |
+| usernames | 业务表已建；先做 username proof 原始落库（`username_proofs`），再接入 UsernameProof reconciliation | [000011](000011_usernames-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000017](000017_usernames%E8%BD%AC%E6%8D%A2%E4%B8%8Ereference%E6%A0%A1%E9%AA%8C.md) |
 | storage_rentals | `onchain_events` type=4 | [000012](000012_storage_rentals-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) |
 | tier_purchases | `onchain_events` type=5，Base 链 | [000013](000013_tier_purchases-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) |
 | 消息类业务表 | casts、reactions、follows、follow_counts、profiles、profile_external_accounts、verifications、channels、channel_follows、channel_members 等 | [000006](000006_casts-%E8%BD%AC%E6%8D%A2%E8%8D%89%E7%A8%BF.md)、[000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md) |
-| OnChainEvent reconciliation | backfill 目前只走 `MessageReconciliation` | [000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md) |
 | 源覆盖缺口 | 000007 中列出的源覆盖缺口继续作为待办 | [000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md)、[000009](000009_%E6%9C%AA%E5%AE%8C%E6%88%90%E4%B8%8E%E6%95%B0%E6%8D%AE%E7%BC%BA%E5%8F%A3.md) |
