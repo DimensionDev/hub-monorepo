@@ -187,6 +187,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 - 只关心 `type=3`（ID_REGISTER）。每次 apply 对涉及的 fid **从 `onchain_events` 全量重算**；原始链上事件只增不改，结果与到达顺序无关，不需要 Go 的 `conversion_state.fids` 水位。
 - 校验（逐事件，新到事件和已存行都过）：chain_id=10；0 < fid ≤ 2^31-1；eventType 1/2/3 及各自必需的 20 字节地址；tx hash 32 字节。
 - 按 `(block_number, log_index)` 排序；同位置内容相同去重，不同报冲突。REGISTER 必须是第一条且唯一；TRANSFER 的 from 必须等于当前 custody，更新 custody 与 timestamp，保留 recovery；CHANGE_RECOVERY 只改 recovery，不改 timestamp。
+- `recovery_address` 一律取链上值。reference 中约 107 万个早期 fid（fid ≤ 1081134，注册于 2023-11-07 至 2025-05-16）的 recovery 为 NULL，而链上是 `0x00000000fcb080a4d6c39a9354da9eb9bc104cd7`；这是 reference 的数据缺陷，不跟随，核对时这类差异属预期。
 - 写入：`id = conversionId("fids", fid)`（与 Go 一致）；业务字段有变化才更新 `updated_at`。
 - 没有 REGISTER：pending，**不建行、不动已有行**，写 issue `missing REGISTER`（payload `missingFields`）。已有行 timestamp 晚于重算结果：不回退，写 issue `stored account is newer than the on-chain history`。历史不一致（冲突、转移链断、REGISTER 不在首位）：实时/backfill 写 issue `invalid account history` 并照常提交（原始事件不丢），`rebuild` 则抛错计为失败。
 - fid 级 issue 用确定性 hash `sha1("fids:<fid>")[0:20]`，每个 fid 同时最多一条，状态变化时替换或清除。
