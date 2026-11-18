@@ -26,6 +26,7 @@ export const FID_ISSUES = {
   pending: "missing REGISTER",
   invalid: "invalid account history",
   stale: "stored account is newer than the on-chain history",
+  gap: "custody history has gaps",
 } as const;
 
 type AccountEvent = {
@@ -112,16 +113,25 @@ function sameEvent(a: AccountEvent, b: AccountEvent): boolean {
   );
 }
 
-export type Reduced = { kind: "account"; account: Account } | { kind: "pending"; missingFields: string[] };
+/** A transfer whose `from` is not the custody captured so far: an event is missing from the history. */
+export type CustodyGap = { blockNumber: number; logIndex: number; expectedFrom: string; actualFrom: string };
+
+export type Reduced =
+  | { kind: "account"; account: Account; gaps: CustodyGap[] }
+  | { kind: "pending"; missingFields: string[] };
 
 /**
- * The account an ordered ID_REGISTER history describes. REGISTER must be the first event; a
- * transfer must continue the current custody; recovery changes do not move `timestamp`.
- * Without a REGISTER the account is pending and nothing is guessed.
+ * The account an ordered ID_REGISTER history describes. REGISTER must be the first event; a later
+ * REGISTER to the same custody is a re-registration (it moves recovery and `timestamp`, never
+ * `registered_at`). A transfer that does not continue the current custody means an event is
+ * missing: the chain is authoritative, so the transfer is applied and the gap reported.
+ * Recovery changes do not move `timestamp`. Without a REGISTER the account is pending and nothing
+ * is guessed.
  */
 export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
   const events = [...input].sort(position);
   let account: Account | undefined;
+  const gaps: CustodyGap[] = [];
   const seen = new Set<number>();
   for (const [i, e] of events.entries()) {
     const validation = validateAccountEvent(e);
@@ -138,7 +148,14 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
     seen.add(body.eventType);
     switch (body.eventType) {
       case IdRegisterEventType.REGISTER:
-        if (account || i !== 0) return err(new HubError("bad_request.conflict", "Inconsistent registration history"));
+        if (account) {
+          if (!(address(body.to) as Buffer).equals(account.custody))
+            return err(new HubError("bad_request.conflict", "Inconsistent registration history"));
+          account.recovery = address(body.recoveryAddress) as Buffer;
+          account.timestamp = e.blockTimestamp;
+          break;
+        }
+        if (i !== 0) return err(new HubError("bad_request.conflict", "Inconsistent registration history"));
         account = {
           custody: address(body.to) as Buffer,
           recovery: address(body.recoveryAddress) as Buffer,
@@ -148,8 +165,14 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
         break;
       case IdRegisterEventType.TRANSFER:
         if (!account) break;
-        if (!(address(body.from) as Buffer).equals(account.custody))
-          return err(new HubError("bad_request.conflict", "Transfer does not continue the captured custody history"));
+        if (!(address(body.from) as Buffer).equals(account.custody)) {
+          gaps.push({
+            blockNumber: e.blockNumber,
+            logIndex: e.logIndex,
+            expectedFrom: `0x${account.custody.toString("hex")}`,
+            actualFrom: (body.from as string).toLowerCase(),
+          });
+        }
         account.custody = address(body.to) as Buffer;
         account.timestamp = e.blockTimestamp;
         break;
@@ -158,7 +181,7 @@ export function reduceAccount(input: AccountEvent[]): HubResult<Reduced> {
         break;
     }
   }
-  if (account) return ok({ kind: "account", account });
+  if (account) return ok({ kind: "account", account, gaps });
   const missingFields = ["registered_at"];
   if (!seen.has(IdRegisterEventType.TRANSFER)) missingFields.push("custody_address", "timestamp");
   if (!seen.has(IdRegisterEventType.CHANGE_RECOVERY)) missingFields.push("recovery_address");
@@ -242,7 +265,9 @@ export async function projectFid(
     return "pending";
   }
 
-  const account = reduced.value.account;
+  const { account, gaps } = reduced.value;
+  // A gap is reported, not fatal: the row still follows the chain.
+  const settle = () => setFidIssue(db, fid, gaps.length ? "gap" : null, gaps.length ? { gaps } : undefined);
   const row = existing[0];
   const now = new Date().toISOString();
   if (!row) {
@@ -259,7 +284,7 @@ export async function projectFid(
         registeredAt: account.registeredAt.toISOString(),
       })
       .execute();
-    await setFidIssue(db, fid, null);
+    await settle();
     return "inserted";
   }
   if (row.timestamp.getTime() > account.timestamp.getTime()) {
@@ -270,7 +295,7 @@ export async function projectFid(
     });
     return "stale";
   }
-  await setFidIssue(db, fid, null);
+  await settle();
   if (
     sameBytes(row.custodyAddress, account.custody) &&
     sameBytes(row.recoveryAddress, account.recovery) &&

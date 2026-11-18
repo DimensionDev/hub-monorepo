@@ -333,24 +333,51 @@ integration("reference tables and fids projection", () => {
       expect((await issues()).map((i) => i.reason)).toEqual([FID_ISSUES.stale]);
     });
 
-    test("a broken history is an issue live (raw kept, commit) and a failure on rebuild", async () => {
+    test("a custody gap follows the chain and is reported until the missing transfer arrives", async () => {
       await deliver(register(100, 1, 2));
-      await deliver(transfer(200, 5, 3)); // `from` is not the current custody
+      await deliver(transfer(200, 5, 3)); // `from` is not the current custody: a transfer is missing
+      expect(await account()).toMatchObject({ custody: hex(3), recovery: hex(2), timestamp: at(200) });
+      const gapIssue = {
+        fid: FID,
+        reason: FID_ISSUES.gap,
+        payload: { gaps: [{ blockNumber: 200, logIndex: 0, expectedFrom: hex(1), actualFrom: hex(5) }] },
+      };
+      expect(await issues()).toEqual([gapIssue]);
+
+      // A gap is not a failure: rebuild writes the row and keeps the issue.
+      const result = await dispatcher.rebuild(db, { projections: ["fids"], fids: [FID] });
+      expect(result).toMatchObject({ rebuilt: 1, failed: [] });
+      expect(await issues()).toEqual([gapIssue]);
+
+      await deliver(transfer(150, 1, 5));
+      expect(await account()).toMatchObject({ custody: hex(3), timestamp: at(200) });
+      expect(await issues()).toEqual([]);
+    });
+
+    test("a second REGISTER to the same custody is a re-registration", async () => {
+      await deliver(register(100, 1, 2));
+      await deliver(register(150, 1, 4));
+      expect(await account()).toMatchObject({
+        custody: hex(1),
+        recovery: hex(4),
+        timestamp: at(150),
+        registeredAt: at(100),
+      });
+      expect(await issues()).toEqual([]);
+    });
+
+    test("a second REGISTER to another custody is an issue live and a failure on rebuild", async () => {
+      await deliver(register(100, 1, 2));
+      await deliver(register(150, 6, 4));
       expect(await db.selectFrom("onchain_events").select("id").execute()).toHaveLength(2);
       expect(await account()).toMatchObject({ custody: hex(1), timestamp: at(100) });
       expect(await issues()).toEqual([
-        {
-          fid: FID,
-          reason: FID_ISSUES.invalid,
-          payload: { error: "Transfer does not continue the captured custody history" },
-        },
+        { fid: FID, reason: FID_ISSUES.invalid, payload: { error: "Inconsistent registration history" } },
       ]);
 
       const result = await dispatcher.rebuild(db, { projections: ["fids"], fids: [FID] });
       expect(result.rebuilt).toBe(0);
-      expect(result.failed).toEqual([
-        { projection: "fids", fid: FID, error: "Transfer does not continue the captured custody history" },
-      ]);
+      expect(result.failed).toEqual([{ projection: "fids", fid: FID, error: "Inconsistent registration history" }]);
     });
 
     test("a REGISTER that is not the first event is an inconsistent history", async () => {
