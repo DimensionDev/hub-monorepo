@@ -7,6 +7,7 @@ import { pendingMigrations } from "../db";
 import { log } from "../log";
 import { RUN_STALE_MS } from "../projections/runs";
 import type { Projection } from "../projections/types";
+import { businessTables } from "./tables";
 
 /** A section either has data or the error that prevented reading it; never a silent zero. */
 export type Section<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -290,6 +291,7 @@ export async function getStatus(ctx: DashboardContext) {
     queue,
     maxFid,
     projections,
+    tables: businessTables(ctx.projections),
     orphanIssues,
     runs: runs.ok ? { ok: true as const, data: runs.data.slice(0, 20) } : runs,
   };

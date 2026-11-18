@@ -238,6 +238,9 @@ function renderNav() {
     .join("");
   $("#overview-nav").classList.toggle("active", state.view === "overview");
   $("#runs-nav").classList.toggle("active", state.view === "runs");
+  $("#tables-nav").classList.toggle("active", state.view === "tables");
+  const tables = s.tables || [];
+  $("#tables-count").textContent = `${tables.filter((t) => t.group === "done").length}/${tables.length}`;
   const running = s.runs.ok ? s.runs.data.filter((r) => r.status === "running" && !r.stale).length : 0;
   $("#running-count").textContent = running;
   $("#running-count").classList.toggle("hidden", !running);
@@ -257,6 +260,7 @@ function render() {
   if (state.view === "projection" && state.status.projections.some((p) => p.name === state.projection))
     renderProjection();
   else if (state.view === "runs") renderRuns();
+  else if (state.view === "tables") renderTables();
   else {
     state.view = "overview";
     renderOverview();
@@ -295,6 +299,18 @@ function renderOverview() {
   const running = s.runs.ok ? s.runs.data.filter((r) => r.status === "running").length : null;
   $("#metrics").innerHTML = [
     metric("已注册投影", num(s.projections.length), "database", s.projections.map((p) => p.name).join("、")),
+    ...(s.tables
+      ? [
+          metric(
+            "业务表进度",
+            `${num(s.tables.filter((t) => t.group === "done").length)}<small> / ${num(s.tables.length)}</small>`,
+            "fields",
+            `有方案未开始 ${s.tables.filter((t) => t.group === "planned").length}，不确定 ${
+              s.tables.filter((t) => t.group === "uncertain").length
+            }`,
+          ),
+        ]
+      : []),
     metric(
       "数据缺口记录",
       issuesFailed ? "读取失败" : num(issueTotal),
@@ -456,6 +472,88 @@ function runsPanel(runs, heading, limit) {
   return `<section class="panel"><div class="panel-heading"><h2>${esc(heading)}</h2><span class="muted">${num(
     runs.data.length,
   )} 条</span></div><div class="table-wrap"><table class="records-table"><thead><tr><th>类型</th><th>状态</th><th>进度</th><th>范围</th><th>开始</th><th>发起</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
+
+// ---------- business tables ----------
+const tableGroups = [
+  { key: "done", title: "已经完成", tone: "green", description: "已注册投影，实时写入，可用 backfill / 重建补历史" },
+  {
+    key: "planned",
+    title: "目前有方案，还未开始",
+    tone: "purple",
+    description: "来源和字段口径已有分析，等待实现或前置条件",
+  },
+  { key: "uncertain", title: "不确定是否可以做", tone: "amber", description: "数据来源或计算口径还没确认" },
+];
+const DOCS_BASE = "https://github.com/DimensionDev/hub-monorepo/blob/main/docs/farcaster-db/";
+function docLinks(docs) {
+  return docs
+    .map(
+      (f) =>
+        `<a class="doc-link" href="${esc(
+          DOCS_BASE + encodeURIComponent(f),
+        )}" target="_blank" rel="noopener noreferrer" title="${esc(f)}">${esc(f.split("_")[0])}</a>`,
+    )
+    .join("");
+}
+function tableGroupPanel(group, tables) {
+  const rows = tables
+    .map((t) => {
+      const projection = t.projection && state.status.projections.find((p) => p.name === t.projection);
+      const stats = projection?.stats?.ok
+        ? `<div class="stat-list">${Object.entries(projection.stats.data)
+            .map(([k, v]) => `<span>${esc(statLabels[k] || k)} <b>${num(v)}</b></span>`)
+            .join("")}</div>`
+        : "";
+      const prereq = t.prerequisites?.length
+        ? `<ul class="prereq-list">${t.prerequisites.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>`
+        : '<span class="muted">—</span>';
+      return `<tr data-table="${esc(
+        t.table,
+      )}"${
+        t.projection ? ` data-projection="${esc(t.projection)}"` : ""
+      }><td><div class="table-name"><span class="table-title">${esc(
+        t.title,
+      )}</span><code>${esc(
+        t.table,
+      )}</code></div></td><td class="source-cell">${esc(
+        t.source,
+      )}</td><td class="note-cell">${esc(
+        t.note,
+      )}${stats}</td><td>${prereq}</td><td class="doc-cell">${docLinks(t.docs)}</td><td>${t.projection ? `<span class="row-arrow">${icon("right")}</span>` : ""}</td></tr>`;
+    })
+    .join("");
+  const body = tables.length
+    ? `<div class="table-wrap"><table class="roadmap-table"><thead><tr><th>业务表</th><th>数据来源</th><th>${
+        group.key === "uncertain" ? "待确认" : group.key === "done" ? "状态" : "方案"
+      }</th><th>前置条件</th><th>文档</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : '<div class="panel-empty"><strong>暂无</strong></div>';
+  return `<section class="panel roadmap-group" id="group-${group.key}"><div class="panel-heading"><h2>${badge(
+    group.title,
+    group.tone,
+  )}<span class="group-count">${num(tables.length)} 张</span></h2><span class="muted">${esc(
+    group.description,
+  )}</span></div>${body}</section>`;
+}
+function renderTables() {
+  const s = state.status;
+  const tables = s.tables || [];
+  heading("规划", "业务表清单", "Farcaster DB 需要生成的全部业务表，按实现进度分组；完成与否以已注册的投影为准");
+  const count = (k) => tables.filter((t) => t.group === k).length;
+  $("#metrics").innerHTML = [
+    metric("业务表", num(tables.length), "fields", "reference 中需要生成的表"),
+    metric("已经完成", num(count("done")), "check", "已注册投影", "green"),
+    metric("有方案，未开始", num(count("planned")), "clock", "等待实现或前置条件"),
+    metric("不确定", num(count("uncertain")), "alert", "来源或口径未确认", count("uncertain") ? "amber" : ""),
+  ].join("");
+  $("#view").innerHTML = `<div class="roadmap-stack">${tableGroups
+    .map((g) =>
+      tableGroupPanel(
+        g,
+        tables.filter((t) => t.group === g.key),
+      ),
+    )
+    .join("")}</div>`;
 }
 
 // ---------- projection ----------
@@ -833,7 +931,13 @@ function go(view, projection = null) {
     state.offset = 0;
   }
   const q =
-    view === "projection" ? `?projection=${encodeURIComponent(projection)}` : view === "runs" ? "?view=runs" : "/";
+    view === "projection"
+      ? `?projection=${encodeURIComponent(projection)}`
+      : view === "runs"
+      ? "?view=runs"
+      : view === "tables"
+      ? "?view=tables"
+      : "/";
   history.pushState(null, "", q === "/" ? "/" : q);
   closeMenu();
   render();
@@ -846,6 +950,7 @@ function fromUrl() {
     state.view = "projection";
     state.projection = q.get("projection");
   } else if (q.get("view") === "runs") state.view = "runs";
+  else if (q.get("view") === "tables") state.view = "tables";
   else state.view = "overview";
 }
 function closeMenu() {
@@ -860,6 +965,7 @@ document.addEventListener("click", (e) => {
   if (t.id === "refresh") return loadStatus(true);
   if (t.id === "overview-nav") return go("overview");
   if (t.id === "runs-nav") return go("runs");
+  if (t.id === "tables-nav") return go("tables");
   if (t.id === "close-drawer") return closeDrawer();
   if (t.id === "close-action") return $("#action-dialog").close();
   if (t.id === "retry-records") return loadIssues();
