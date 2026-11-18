@@ -40,7 +40,8 @@ import url from "node:url";
 import { ok, Result } from "neverthrow";
 import { enqueueBackfill, getQueue, getWorker } from "./worker";
 import { Queue } from "bullmq";
-import { backfillFidForProjections, ProjectionDispatcher, projections } from "./projections";
+import { backfillFidForProjections, onChainReconcileTypesFor, ProjectionDispatcher, projections } from "./projections";
+import { OnChainEventReconciliation } from "../shuttle/onChainEventReconciliation";
 import { runRebuild } from "./projections/runs";
 import { storeOnChainEvent } from "./raw/onchainEvents";
 
@@ -166,6 +167,8 @@ export class App implements MessageHandler {
       log,
       undefined,
     );
+    // biome-ignore lint/style/noNonNullAssertion: client is always initialized
+    const onChainReconciler = new OnChainEventReconciliation(this.hubSubscriber.hubClient!, this.db, log);
     if (projectionsOnly) {
       const dispatcher = dispatcherFor(this.dbSchema);
       for (const fid of fids) {
@@ -175,6 +178,7 @@ export class App implements MessageHandler {
           dispatcher,
           projections,
           fid,
+          onChainReconciler,
         );
         if (projected > 0) log.info({ fid, missing, projected }, "Backfilled projected messages");
       }
@@ -198,6 +202,19 @@ export class App implements MessageHandler {
           }
         },
       );
+      // On-chain history the projections need (e.g. ID_REGISTER for fids) goes through the same pipeline.
+      const onChainTypes = onChainReconcileTypesFor(projections);
+      if (onChainTypes.length) {
+        const missing: Parameters<ProjectionDispatcher["processMissingOnChainEvents"]>[1] = [];
+        await onChainReconciler.reconcileOnChainEventsForFid(
+          fid,
+          async (event, missingInDb) => {
+            if (missingInDb) missing.push(event);
+          },
+          { types: onChainTypes },
+        );
+        await dispatcherFor(this.dbSchema).processMissingOnChainEvents(this.db, missing);
+      }
     }
   }
 

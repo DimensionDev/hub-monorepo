@@ -1,4 +1,5 @@
 import pg from "pg";
+import { log } from "../log";
 import {
   CamelCasePlugin,
   WithSchemaPlugin,
@@ -226,8 +227,9 @@ export type OnChainEventsTable = {
 export type OnChainEventRow = Selectable<OnChainEventsTable>;
 export type InsertableOnChainEventRow = Insertable<OnChainEventsTable>;
 
-// USERNAMES --------------------------------------------------------------------------------------
-export type UsernamesTable = {
+// USERNAME PROOFS --------------------------------------------------------------------------------
+// Raw username proofs. The table is `username_proofs`; `usernames` is the business table name.
+export type UsernameProofsTable = {
   id: Generated<string>;
   createdAt: Generated<Date>;
   updatedAt: Generated<Date>;
@@ -239,23 +241,30 @@ export type UsernamesTable = {
   type: UserNameType;
 };
 
-export type UsernameRow = Selectable<UsernamesTable>;
-export type InsertableUsernameRow = Insertable<UsernamesTable>;
+/** @deprecated Renamed to UsernameProofsTable (the table is now `username_proofs`). */
+export type UsernamesTable = UsernameProofsTable;
+export type UsernameRow = Selectable<UsernameProofsTable>;
+export type InsertableUsernameRow = Insertable<UsernameProofsTable>;
 
 // ALL TABLES -------------------------------------------------------------------------------------
 export interface HubTables {
   messages: MessagesTable;
   onchain_events: OnChainEventsTable;
-  usernames: UsernamesTable;
+  username_proofs: UsernameProofsTable;
 }
 
 export const getDbClient = (connectionString?: string, schema = "public") => {
+  const pool = new Pool({
+    max: 10,
+    connectionString,
+  });
+  // An idle client the server drops (restart, failover, pg_terminate_backend) is emitted here;
+  // without a listener the error is unhandled and takes the process down. The pool has already
+  // discarded the client, and the next query opens a new connection.
+  pool.on("error", (error) => log.warn({ error }, "Idle Postgres client error"));
   return new Kysely<HubTables>({
     dialect: new PostgresDialect({
-      pool: new Pool({
-        max: 10,
-        connectionString,
-      }),
+      pool,
       cursor: Cursor,
     }),
     plugins: [new CamelCasePlugin(), new WithSchemaPlugin(schema)],

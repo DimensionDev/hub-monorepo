@@ -6,6 +6,7 @@ import { App } from "./example-app/app";
 import { migrateToLatest } from "./example-app/db";
 import { log } from "./log";
 import { DB, getDbClient, HubEventProcessor } from "./shuttle";
+import { dropTestDatabase } from "./testDatabase";
 import { MessageProcessor } from "./shuttle/messageProcessor";
 
 // Never fall back to the application's production connection or dotenv configuration.
@@ -34,7 +35,7 @@ integration("blocks incremental projection", () => {
   afterAll(async () => {
     await db?.destroy();
     if (admin) {
-      await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+      await dropTestDatabase(admin, database);
       await admin.end();
     }
   });
@@ -423,7 +424,9 @@ integration("blocks incremental projection", () => {
     const reopenMigration = async () => {
       await sql`DROP TABLE public.shuttle_message_state`.execute(db);
       await sql`DELETE FROM public.kysely_migration
-        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs')`.execute(db);
+        WHERE name IN ('005_blocks', '006_projection_framework', '007_projection_runs', '008_reference_tables')`.execute(
+        db,
+      );
     };
     await reopenMigration();
     await sql`DROP INDEX public.blocks_updated_at_idx`.execute(db);

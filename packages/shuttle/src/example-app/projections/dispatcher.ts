@@ -2,18 +2,21 @@ import {
   HubError,
   HubEvent,
   isMergeMessageHubEvent,
+  isMergeOnChainHubEvent,
   isPruneMessageHubEvent,
   isRevokeMessageHubEvent,
   Message,
+  OnChainEvent,
   extractTimestampFromEvent,
 } from "@dimensiondev/hub-nodejs";
 import { sql } from "kysely";
 import type { DB } from "../../shuttle";
 import { MessageProcessor } from "../../shuttle/messageProcessor";
 import type { AppDb } from "../db";
-import { recordIssue } from "./issues";
+import { storeOnChainEventRow } from "../raw/onchainEvents";
+import { messageSubject, onChainSubject, recordIssue } from "./issues";
 import { recordState, shouldApply } from "./lifecycle";
-import type { Projection, ProjectionSource, RawChange } from "./types";
+import { changeFid, type Projection, type ProjectionSource, type RawChange } from "./types";
 
 export function mutations(event: HubEvent): RawChange[] {
   if (isMergeMessageHubEvent(event)) {
@@ -28,6 +31,7 @@ export function mutations(event: HubEvent): RawChange[] {
     return [{ kind: "message", message: event.pruneMessageBody.message, operation: "prune" }];
   if (isRevokeMessageHubEvent(event))
     return [{ kind: "message", message: event.revokeMessageBody.message, operation: "revoke" }];
+  if (isMergeOnChainHubEvent(event)) return [{ kind: "onchain", event: event.mergeOnChainEventBody.onChainEvent }];
   return [];
 }
 
@@ -51,11 +55,13 @@ export class ProjectionDispatcher {
   async processEvent(event: HubEvent, txn: DB): Promise<boolean> {
     const changes = mutations(event);
     if (!changes.some((c) => this.interested(c).length > 0)) return false;
+    // The event id orders message lifecycle changes; immutable on-chain events don't need it.
     if (
-      !Number.isSafeInteger(event.id) ||
-      event.id <= 0 ||
-      !Number.isSafeInteger(event.timestamp) ||
-      event.timestamp <= 0
+      changes.some((c) => c.kind === "message") &&
+      (!Number.isSafeInteger(event.id) ||
+        event.id <= 0 ||
+        !Number.isSafeInteger(event.timestamp) ||
+        event.timestamp <= 0)
     ) {
       throw new HubError(
         "bad_request.validation_failure",
@@ -91,6 +97,19 @@ export class ProjectionDispatcher {
   async processMissingMessages(db: DB, messages: Message[]): Promise<number> {
     const changes = messages
       .map((message): RawChange => ({ kind: "message", message, operation: "merge" }))
+      .filter((change) => this.interested(change).length > 0);
+    if (changes.length === 0) return 0;
+    await db.transaction().execute((trx) => this.run(trx as unknown as AppDb, changes, { kind: "backfill" }));
+    return changes.length;
+  }
+
+  /**
+   * Backfill on-chain events missing from the DB in one transaction (they are immutable, so there
+   * is no lifecycle to guard; the raw insert is idempotent). Returns how many were projected.
+   */
+  async processMissingOnChainEvents(db: DB, events: OnChainEvent[]): Promise<number> {
+    const changes = events
+      .map((event): RawChange => ({ kind: "onchain", event }))
       .filter((change) => this.interested(change).length > 0);
     if (changes.length === 0) return 0;
     await db.transaction().execute((trx) => this.run(trx as unknown as AppDb, changes, { kind: "backfill" }));
@@ -169,7 +188,7 @@ export class ProjectionDispatcher {
   }
 
   private async run(db: AppDb, changes: RawChange[], source: ProjectionSource): Promise<void> {
-    const fids = [...new Set(changes.map((c) => c.message.data?.fid))].sort((a, b) => (a ?? 0) - (b ?? 0));
+    const fids = [...new Set(changes.map(changeFid))].sort((a, b) => (a ?? 0) - (b ?? 0));
     for (const fid of fids) {
       if (!fid) throw new HubError("bad_request.validation_failure", "Missing message fid");
       await this.lock(db, fid);
@@ -178,6 +197,32 @@ export class ProjectionDispatcher {
     const applied = new Map<Projection, RawChange[]>();
     for (const change of changes) {
       const projections = this.interested(change);
+      if (change.kind === "onchain") {
+        const accepted: Projection[] = [];
+        for (const projection of projections) {
+          const validation = projection.validate?.(change);
+          if (validation?.isErr()) {
+            await recordIssue(db, projection.name, onChainSubject(change.event), validation.error.message, {
+              type: change.event.type,
+              chainId: change.event.chainId,
+              blockNumber: change.event.blockNumber,
+              logIndex: change.event.logIndex,
+            });
+          } else {
+            accepted.push(projection);
+          }
+        }
+        // Same rule as messages: projections recompute from onchain_events, so a row every
+        // interested projection rejects is not stored. Nobody interested: plain raw storage.
+        if (projections.length > 0 && accepted.length === 0) continue;
+        await storeOnChainEventRow(change.event, db as unknown as DB);
+        for (const projection of accepted) {
+          const list = applied.get(projection) ?? [];
+          list.push(change);
+          applied.set(projection, list);
+        }
+        continue;
+      }
       if (projections.length === 0) {
         await MessageProcessor.storeMessage(
           change.message,
@@ -192,7 +237,7 @@ export class ProjectionDispatcher {
       for (const projection of projections) {
         const validation = projection.validate?.(change);
         if (validation?.isErr()) {
-          await recordIssue(db, projection.name, change.message, validation.error.message, {
+          await recordIssue(db, projection.name, messageSubject(change.message), validation.error.message, {
             operation: change.operation,
             type: change.message.data?.type,
           });

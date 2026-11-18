@@ -10,7 +10,7 @@ import { pino } from "pino";
 import { DB } from "./db";
 
 // `UserNameProof.name` on the wire is the username's UTF-8 bytes (e.g. "alice" -> [0x61,...]).
-// The `usernames` table on `HubTables` stores `username` as the human-readable string, so any
+// The `username_proofs` table on `HubTables` stores `username` as the human-readable string, so any
 // time we cross the wire<->row boundary we need to round-trip through UTF-8, not hex.
 function nameBytesToUsername(name: Uint8Array): string {
   return Buffer.from(name).toString("utf8");
@@ -162,7 +162,7 @@ export class UsernameProofReconciliation {
   ): Promise<Result<UserNameProof[], Error>> {
     try {
       let query = this.db
-        .selectFrom("usernames")
+        .selectFrom("username_proofs")
         .select(["username", "fid", "proofTimestamp", "custodyAddress", "type"])
         .where("fid", "=", fid)
         .where("type", "=", proofType)

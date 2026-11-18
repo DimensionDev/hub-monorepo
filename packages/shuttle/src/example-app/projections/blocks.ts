@@ -204,8 +204,9 @@ function reduce(rows: MessageRow[]): HubResult<BlockState> {
 /** Touched targets per blocker fid; a compact state rescans every relationship of the fid. */
 function scopes(changes: RawChange[]): Map<number, Scope> {
   const touched = new Map<number, Scope>();
-  for (const { message } of changes) {
-    const data = message.data;
+  for (const change of changes) {
+    if (change.kind !== "message") continue;
+    const data = change.message.data;
     if (!data) continue;
     const scope = touched.get(data.fid) ?? { targets: new Set<number>(), full: false };
     if (data.type === MessageType.LINK_COMPACT_STATE) scope.full = true;
@@ -308,8 +309,11 @@ export const blocksProjection: Projection = {
   name: "blocks",
   // getAllLinkMessagesByFid returns adds and removes; reconciliation also fetches compact states.
   reconcileTypes: [MessageType.LINK_ADD],
-  interestedIn: (change) => isBlock(change.message),
-  validate: (change) => validate(change.message),
+  interestedIn: (change) => change.kind === "message" && isBlock(change.message),
+  validate: (change) =>
+    change.kind === "message"
+      ? validate(change.message)
+      : err(new HubError("bad_request.validation_failure", "Not a block message")),
   apply: applyBlocks,
   rebuildFids,
   rebuild: ({ db }, fid) => projectFid(db, fid, { targets: new Set<number>(), full: false, rebuild: true }),

@@ -2,8 +2,10 @@ import { type Kysely, sql } from "kysely";
 
 // biome-ignore lint/suspicious/noExplicitAny: legacy code, avoid using ignore for new code
 export const up = async (db: Kysely<any>) => {
+  // Raw username proofs. Named `username_proofs` so the business `usernames` table (migration 008,
+  // reference structure) can live in the same schema.
   await db.schema
-    .createTable("usernames")
+    .createTable("username_proofs")
     .addColumn("id", "uuid", (col) => col.defaultTo(sql`generate_ulid()`))
     .addColumn("createdAt", "timestamptz", (col) => col.notNull().defaultTo(sql`current_timestamp`))
     .addColumn("updatedAt", "timestamptz", (col) => col.notNull().defaultTo(sql`current_timestamp`))
@@ -19,8 +21,8 @@ export const up = async (db: Kysely<any>) => {
   // Use sql.ref so the predicate column lookup is unconstrained by the columns() narrowing,
   // and goes through Kysely's identifier handling so the schema set by WithSchemaPlugin sticks.
   await db.schema
-    .createIndex("usernames_fid_type_username_unique")
-    .on("usernames")
+    .createIndex("username_proofs_fid_type_username_unique")
+    .on("username_proofs")
     .columns(["fid", "type", "username"])
     .where(sql.ref("deletedAt"), "is", null)
     .unique()
