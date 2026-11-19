@@ -438,18 +438,18 @@ integration("reference tables and fids projection", () => {
     test("on-chain events nobody projects are still stored by the generic path", async () => {
       await deliver(
         OnChainEvent.create({
-          type: OnChainEventType.EVENT_TYPE_STORAGE_RENT,
+          type: OnChainEventType.EVENT_TYPE_SIGNER_MIGRATED,
           chainId: 10,
           blockNumber: 5,
           blockTimestamp: time(5),
           transactionHash: Buffer.alloc(32, 5),
           logIndex: 1,
           fid: FID,
-          storageRentEventBody: { payer: address(1), units: 1, expiry: 1 },
+          signerMigratedEventBody: { migratedAt: time(5) },
         }),
       );
       expect(await db.selectFrom("onchain_events").select("type").execute()).toEqual([
-        { type: OnChainEventType.EVENT_TYPE_STORAGE_RENT },
+        { type: OnChainEventType.EVENT_TYPE_SIGNER_MIGRATED },
       ]);
       expect(await account()).toBeUndefined();
     });

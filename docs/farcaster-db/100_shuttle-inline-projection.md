@@ -1,6 +1,6 @@
 # Shuttle 内联业务投影
 
-Status: 现行设计。一期：通用投影框架 + blocks。二期：一次性建好全部业务表（迁移 008）、dispatcher 支持链上事件、fids 投影与 ID_REGISTER 链上补齐。
+Status: 现行设计。一期：通用投影框架 + blocks。二期：一次性建好全部业务表（迁移 008）、dispatcher 支持链上事件、fids 投影与 ID_REGISTER 链上补齐。三期：storage_rentals、tier_purchases、signers、verifications、profiles、profile_external_accounts 投影，以及 STORAGE_RENT / TIER_PURCHASE / SIGNER 链上补齐。
 
 ## 背景
 
@@ -55,8 +55,15 @@ projections/
   ids.ts          确定性 UUIDv5
   blocks.ts       blocks 投影
   fids.ts         fids 投影（onchain_events 的 ID_REGISTER）
-  backfill.ts     只补投影的 backfill（消息 + 链上事件）
-  index.ts        注册表：projections = [blocksProjection, fidsProjection]
+  receipts.ts     收据类表的共用逻辑（storage_rentals、tier_purchases）
+  storageRentals.ts storage_rentals 投影（onchain_events 的 STORAGE_RENT）
+  tierPurchases.ts  tier_purchases 投影（onchain_events 的 TIER_PURCHASE，Base 链）
+  signers.ts      signers 投影（onchain_events 的 SIGNER）；appFids() 供其他投影查应用
+  messageRows.ts  从 messages.raw 解码、生命周期判断、hub CRDT 排序
+  verifications.ts verifications 投影
+  userData.ts     profiles、profile_external_accounts 投影（USER_DATA_ADD）
+  backfill.ts     只补投影的 backfill（先链上事件，再消息）
+  index.ts        注册表；顺序即同一事件内 apply 顺序和 rebuild 顺序，signers 必须在读 app_fid 的投影之前
 raw/
   onchainEvents.ts  onchain_events 原始落库（幂等）
 reference/
@@ -199,6 +206,46 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 
 上线顺序：部署（008 建表）→ `rebuild` REBUILD_PROJECTIONS=fids → 只补投影的 backfill（`BACKFILL_PROJECTIONS_ONLY=true`）→ 抽样与 reference.fids 核对。
 
+## storage_rentals 投影
+
+规则来自 [000012](000012_storage_rentals-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) 和 Go `initreceipts/model.go`：
+
+- 只关心 `type=4`（STORAGE_RENT）。每次 apply 对涉及的 fid 从 `onchain_events` 全量重算该 fid 的收据；不需要 Go 的 `conversion_state.storage_rentals` 辅助状态和水位。
+- 一张收据一行，身份为 `(chain_id, tx_hash, log_index)`，`id = conversionId("storage_rentals", "10:<tx hex>:<log>")`（与 Go 一致）。同用户多次租赁、同一交易里的多张收据各自成行；过期收据保留。
+- `units`、`expiry` 取自 body，必须是非负整数且能放进目标列（缺失不等于 0）；`expiry` 是 Shuttle 已按区块时间算好的 Unix 秒，直接转 UTC，与 reference 抽查一致。`timestamp` 为区块时间。
+- 校验：chain 必须是 10、fid 在 1..int32 内、交易哈希 32 字节、log_index 非负。实时到达的不合格事件按 issue 记录，不落原始表（同 fids）。fid 0 的租赁（reference 有 6 条）投影不接：dispatcher 按 fid 加锁、拒绝 fid 0，接了会让 hub 事件失败；它们仍按通用路径落原始表，是已知缺口。
+- 同一收据在不同区块出现：内容一致则合并（取较新区块），内容冲突则记 issue、不写该收据。
+- 写入只插入或更新，不删除；按 id 查已有行（reference 没有 transaction_hash 索引），fid 修正时原地更新，保留 id 与 `created_at`，业务字段不变不动 `updated_at`。
+- issue 以交易哈希为 subject，每条 reason 都带 fid 与 log_index，同一交易的多张收据互不覆盖。rebuild 遇到坏收据只记 issue、不判失败：原始事件不可变，抛错会让该 fid 的正常收据每次都回滚。
+- `onChainReconcileTypes = [EVENT_TYPE_STORAGE_RENT]`。生产 `onchain_events` 目前只有投影上线前已采到的近期租赁（2026-11-17 起），历史租赁靠只补投影的 backfill 从 hub 拉取。
+
+tier_purchases 与 storage_rentals 共用 `receipts.ts`（Go 的 `initreceipts` 也是一个模块）：chain 8453、body 的 `tierType`、`forDays`（→ `duration_in_days`）、20 字节 `payer`，fid 为 bigint。reference 有 1 条 fid=0 的购买，同样不接。
+
+## signers 投影与 app_fid 归属
+
+规则来自 [000010](000010_signers-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) 和 Go `initsigners/model.go`：
+
+- 只关心 `type=1`（SIGNER），按 (fid, 公钥) 一行，`id = conversionId("signers", "<fid>:<key hex>")`。每次从该 fid 的全部 SIGNER 事件重算。
+- 每把公钥按链上顺序：ADD 注册（被 REMOVE 后的 ADD 忽略）、REMOVE 软删除、ADMIN_RESET 恢复最早捕获的 ADD 并允许之后的 ADD 重新注册；同一位置内容冲突整 fid 拒绝。
+- `app_fid` 是 ADD 元数据（SignedKeyRequestMetadata，动态 ABI tuple，首个 word 是偏移 32）里的 `requestFid`，按 Go 的 ABI 检查逐项移植。缺少 ADD、元数据无法解析时记 per-key issue（可清除），不写行。
+- **只收 keyType 1**：2026-11-17..19 采到的 91 个 keyType 2 公钥在 reference 中一个都没有，165 个 keyType 1 公钥的 app_fid、注册时间、删除状态与 reference 全部一致。gasless 的 KEY_ADD / KEY_REMOVE 消息（生产已有，requestFid 可解析）reference 也没有，未接入。
+- **app_fid 跨表重算**：verifications、profile_external_accounts 用 `appFids(db, fid, keys)` 按消息的签名公钥查应用；它们同时对有效的 SIGNER 事件感兴趣，在同一事务里于 signers 之后重算该 fid，所以签名者晚到时会补上。无效的 SIGNER 事件只有 signers 感兴趣，被拒后仍不落原始表。rebuild 按注册顺序执行，只重建 signers 时依赖表不会跟着更新，要一起重建。
+- backfill（只补投影和全量）都改为先对账链上事件、再对账消息，减少依赖表的二次重算。
+
+## verifications、profiles、profile_external_accounts 投影
+
+三者都从 `messages` 重算整个 fid，解码 `raw` 而不是 JSON body（地址按原始字节保存）。胜出消息按 hub CRDT 顺序：时间戳大者胜，同时间 REMOVE 胜 ADD，再比 hash；被覆盖、prune、revoke 的消息不算有效。
+
+- **verifications**：按 (fid, 协议, 地址) 一行（以太坊 20 字节、Solana 32 字节）。有效 ADD 胜出则为有效行，`timestamp` 为该 ADD 时间；有效 REMOVE 胜出则在其时间软删除；没有有效消息但有过 ADD 则在失效时间软删除；只有 REMOVE 不建行。`app_fid` 取胜出 ADD 签名公钥的应用，未知为 NULL。与 reference 的差异：同一地址同一时间戳的两条 ADD，hub 保留 hash 大的一条，reference 却把这行标成删除（抽查见 2 条），本投影按 hub 状态保持有效。
+- **profiles**：每个 fid 一行，`id = conversionId("profiles", fid)`。每个字段取该类型最新的有效 UserData；从未设置为 NULL，显式空串保留空串（reference 中 bio 空串 20 万条、NULL 173 万条）。`location` 原样保存，`geo:<lat>,<lon>` 解析出经纬度；主地址转字节，Solana 为 base58 解码。从不软删除（reference 没有删除行）。
+- **profile_external_accounts**：Twitter（8）、GitHub（9）按 (fid, 类型) 一行；`account`、`timestamp` 取胜出消息；值为空串时在其时间软删除，没有有效消息时在失效时间软删除。`app_fid` 必填，签名者未知时记 issue「unknown signer app fid」：没有行就不写，已有行照常更新账户与删除状态、保留原 app_fid；SIGNER 到达后自动补上并清除 issue。reference 另有约 4,700 条非空账户已删除，规则无法从协议数据推出，未复刻。
+
+用生产库已采到的原始数据在隔离库里重建并与 reference 对照：verifications 295 行全部命中、时间戳和已知 app_fid 一致；profiles 10 个字段共 888 个值全部一致；profile_external_accounts 10 行全部一致。
+
+## 上线顺序
+
+部署 → `rebuild` REBUILD_PROJECTIONS=storage_rentals,tier_purchases,signers,verifications,profiles,profile_external_accounts（signers 在前，按注册顺序）→ 只补投影的 backfill（`BACKFILL_PROJECTIONS_ONLY=true`；目前不能单选投影，会对每个 fid 重新对账全部已注册投影的消息族和链上事件；上次 blocks + fids 全量约 3.9 小时，这次多了 verifications、user data 两个消息族和三种链上事件；需 backfill worker 在线）→ 抽样与 reference 核对。
+
 ## 增加一张新业务表
 
 1. 先读对应的旧文档（例如 [000008 fids](000008_fids-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)），只取业务规则章节，即字段口径、业务主键、冲突与缺口处理。
@@ -211,6 +258,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 4. 在 `projections/index.ts` 的 `projections` 数组里注册。
 5. 写集成测试，至少覆盖：同一组事件打乱顺序、批内并发、全部改走 backfill 后结果一致；revoke 之后再 backfill 旧 merge 不会复活；校验失败写 issue 且事务提交。
 6. 数据来自 `onchain_events` 时用 `onchain` 变更并声明 `onChainReconcileTypes`（参考 fids）；用户名证明还未接入 dispatcher。
+7. 需要 `app_fid` 时用 `signers.ts` 的 `appFids`，`interestedIn` 加上 `isSignerChange`，并注册在 signers 之后。
 
 ## Cutover 与 backfill
 
@@ -251,9 +299,7 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 
 | 项 | 说明 | 旧文档 |
 |---|---|---|
-| signers | 链上 KEY 事件；`app_fid` 归属的跨表重算策略待定；gasless 路径另行分析 | [000010](000010_signers-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000015](000015_Neynar%E8%A1%A5%E9%BD%90signers.md)、[000016](000016_signers%E5%92%8Ccustody_address%E7%9A%84%E5%8C%BA%E5%88%AB.md) |
-| usernames | 业务表已建；先做 username proof 原始落库（`username_proofs`），再接入 UsernameProof reconciliation | [000011](000011_usernames-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000017](000017_usernames%E8%BD%AC%E6%8D%A2%E4%B8%8Ereference%E6%A0%A1%E9%AA%8C.md) |
-| storage_rentals | `onchain_events` type=4 | [000012](000012_storage_rentals-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) |
-| tier_purchases | `onchain_events` type=5，Base 链 | [000013](000013_tier_purchases-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) |
-| 消息类业务表 | casts、reactions、follows、follow_counts、profiles、profile_external_accounts、verifications、channels、channel_follows、channel_members 等 | [000006](000006_casts-%E8%BD%AC%E6%8D%A2%E8%8D%89%E7%A8%BF.md)、[000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md) |
+| usernames | 业务表已建；原始用户名证明目前没有落库（迁移 004 未注册、hub 的 MERGE_USERNAME_PROOF 事件未处理）。需要新的变更类型、fname 转移时锁两个 fid、接入 UsernameProof reconciliation | [000011](000011_usernames-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md)、[000017](000017_usernames%E8%BD%AC%E6%8D%A2%E4%B8%8Ereference%E6%A0%A1%E9%AA%8C.md) |
+| signers gasless 路径 | KEY_ADD / KEY_REMOVE 消息（reference 暂无） | [000010](000010_signers-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) |
+| 消息类业务表 | casts、reactions、follows（数据量大，需先确认磁盘容量）、follow_counts、channels、channel_follows、channel_members 等 | [000006](000006_casts-%E8%BD%AC%E6%8D%A2%E8%8D%89%E7%A8%BF.md)、[000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md) |
 | 源覆盖缺口 | 000007 中列出的源覆盖缺口继续作为待办 | [000007](000007_%E8%A1%A8%E4%BE%9D%E8%B5%96%E5%85%B3%E7%B3%BB.md)、[000009](000009_%E6%9C%AA%E5%AE%8C%E6%88%90%E4%B8%8E%E6%95%B0%E6%8D%AE%E7%BC%BA%E5%8F%A3.md) |

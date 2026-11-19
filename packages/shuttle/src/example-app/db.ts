@@ -83,6 +83,91 @@ export interface AppTables extends HubTables {
     recoveryAddress: Uint8Array | null;
     registeredAt: ColumnType<Date | null, string | null, string | null>;
   };
+  storageRentals: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    fid: number;
+    units: number;
+    expiry: ColumnType<Date, string, string>;
+    timestamp: ColumnType<Date, string, string>;
+    transactionHash: Uint8Array | null;
+    logIndex: number | null;
+  };
+  tierPurchases: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    fid: number;
+    tierType: number;
+    durationInDays: number;
+    payer: Uint8Array;
+    timestamp: ColumnType<Date, string, string>;
+    transactionHash: Uint8Array;
+    logIndex: number;
+  };
+  signers: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    timestamp: ColumnType<Date, string, string>;
+    fid: number;
+    appFid: number;
+    signer: Uint8Array;
+  };
+  verifications: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    timestamp: ColumnType<Date, string, string>;
+    address: Uint8Array;
+    fid: number;
+    protocol: number;
+    appFid: number | null;
+  };
+  profiles: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    fid: number;
+    bio: string | null;
+    pfpUrl: string | null;
+    url: string | null;
+    username: string | null;
+    displayName: string | null;
+    location: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    primaryEthAddress: Uint8Array | null;
+    primarySolAddress: Uint8Array | null;
+    bannerUrl: string | null;
+    tokenUri: string | null;
+  };
+  profileExternalAccounts: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    timestamp: ColumnType<Date, string, string>;
+    fid: number;
+    appFid: number;
+    type: number;
+    account: string;
+  };
+  usernames: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    deletedAt: ColumnType<Date | null, string | null, string | null>;
+    username: string;
+    fid: number;
+    custodyAddress: Uint8Array | null;
+    proofTimestamp: ColumnType<Date, string, string>;
+    type: number;
+  };
   shuttleMessageState: {
     fid: number;
     hash: Uint8Array;

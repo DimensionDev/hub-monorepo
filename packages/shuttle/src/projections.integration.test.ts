@@ -194,6 +194,9 @@ integration("projection framework", () => {
         calls.push("compact");
         return ok(MessagesResponse.create({ messages: [compactState] }));
       },
+      // Families other registered projections reconcile; nothing to backfill there.
+      getAllVerificationMessagesByFid: async () => ok(MessagesResponse.create({ messages: [] })),
+      getAllUserDataMessagesByFid: async () => ok(MessagesResponse.create({ messages: [] })),
     };
     const reconciler = new MessageReconciliation(hub as unknown as HubRpcClient, db, log);
 
@@ -297,7 +300,8 @@ integration("projection framework", () => {
   });
 
   test("replayed on-chain events are stored once", async () => {
-    const onChainEvent = Factories.StorageRentOnChainEvent.build({ blockNumber: 77, logIndex: 3 });
+    // A type no projection handles, so this exercises the generic raw path.
+    const onChainEvent = Factories.SignerMigratedOnChainEvent.build({ blockNumber: 77, logIndex: 3 });
     const event = HubEvent.create({
       id: 9,
       type: HubEventType.MERGE_ON_CHAIN_EVENT,

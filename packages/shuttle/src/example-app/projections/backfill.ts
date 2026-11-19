@@ -30,6 +30,22 @@ export async function backfillFidForProjections(
   fid: number,
   onChainReconciler?: OnChainEventReconciliation,
 ): Promise<{ missing: number; projected: number }> {
+  // On-chain events first, in their own transaction: projections that attribute messages to an
+  // app read the signers that SIGNER events write.
+  const onChainTypes = onChainReconcileTypesFor(projections);
+  const missingOnChain: OnChainEvent[] = [];
+  let projected = 0;
+  if (onChainReconciler && onChainTypes.length) {
+    await onChainReconciler.reconcileOnChainEventsForFid(
+      fid,
+      async (event, missingInDb) => {
+        if (missingInDb) missingOnChain.push(event);
+      },
+      { types: onChainTypes },
+    );
+    projected += await dispatcher.processMissingOnChainEvents(db, missingOnChain);
+  }
+
   const messageTypes = reconcileTypesFor(projections);
   const missing: Message[] = [];
   if (messageTypes.length) {
@@ -44,19 +60,6 @@ export async function backfillFidForProjections(
       messageTypes,
     );
   }
-  let projected = await dispatcher.processMissingMessages(db, missing);
-
-  const onChainTypes = onChainReconcileTypesFor(projections);
-  const missingOnChain: OnChainEvent[] = [];
-  if (onChainReconciler && onChainTypes.length) {
-    await onChainReconciler.reconcileOnChainEventsForFid(
-      fid,
-      async (event, missingInDb) => {
-        if (missingInDb) missingOnChain.push(event);
-      },
-      { types: onChainTypes },
-    );
-    projected += await dispatcher.processMissingOnChainEvents(db, missingOnChain);
-  }
+  projected += await dispatcher.processMissingMessages(db, missing);
   return { missing: missing.length + missingOnChain.length, projected };
 }
