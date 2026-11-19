@@ -12,7 +12,7 @@ updated: 2026-11-16
 > **部分取代**
 > 业务规则章节仍有效。snapshot/init/restart/resume/CLI 相关章节已被 shuttle 内联投影取代，见 [100_shuttle-inline-projection](100_shuttle-inline-projection.md)。
 
-Status: implemented
+Status: 已实现为 shuttle 内联投影（`example-app/projections/signers.ts`，见 [100](100_shuttle-inline-projection.md#signers-投影与-app_fid-归属)）。与 reference 一致只收 keyType 1。
 
 ## 已完成的分析
 

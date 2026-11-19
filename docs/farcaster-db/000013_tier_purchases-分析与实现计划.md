@@ -10,7 +10,7 @@ tags:
 > **部分取代**
 > 业务规则章节仍有效。snapshot/init/restart/resume/CLI 相关章节已被 shuttle 内联投影取代，见 [100_shuttle-inline-projection](100_shuttle-inline-projection.md)。
 
-Status: ready-for-agent
+Status: 已实现为 shuttle 内联投影（`example-app/projections/tierPurchases.ts`，与 storage_rentals 共用 `receipts.ts`）。
 
 ## 数据与依赖
 
