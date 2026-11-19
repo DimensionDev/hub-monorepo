@@ -238,7 +238,7 @@ tier_purchases 与 storage_rentals 共用 `receipts.ts`（Go 的 `initreceipts` 
 
 - **verifications**：按 (fid, 协议, 地址) 一行（以太坊 20 字节、Solana 32 字节）。有效 ADD 胜出则为有效行，`timestamp` 为该 ADD 时间；有效 REMOVE 胜出则在其时间软删除；没有有效消息但有过 ADD 则在失效时间软删除；只有 REMOVE 不建行。`app_fid` 取胜出 ADD 签名公钥的应用，未知为 NULL。与 reference 的差异：同一地址同一时间戳的两条 ADD，hub 保留 hash 大的一条，reference 却把这行标成删除（抽查见 2 条），本投影按 hub 状态保持有效。
 - **profiles**：每个 fid 一行，`id = conversionId("profiles", fid)`。每个字段取该类型最新的有效 UserData；从未设置为 NULL，显式空串保留空串（reference 中 bio 空串 20 万条、NULL 173 万条）。`location` 原样保存，`geo:<lat>,<lon>` 解析出经纬度；主地址转字节，Solana 为 base58 解码。从不软删除（reference 没有删除行）。
-- **profile_external_accounts**：Twitter（8）、GitHub（9）按 (fid, 类型) 一行；`account`、`timestamp` 取胜出消息；值为空串时在其时间软删除，没有有效消息时在失效时间软删除。`app_fid` 必填，签名者未知时记 issue「unknown signer app fid」、不写行，SIGNER 到达后自动补写并清除。reference 另有约 4,700 条非空账户已删除，规则无法从协议数据推出，未复刻。
+- **profile_external_accounts**：Twitter（8）、GitHub（9）按 (fid, 类型) 一行；`account`、`timestamp` 取胜出消息；值为空串时在其时间软删除，没有有效消息时在失效时间软删除。`app_fid` 必填，签名者未知时记 issue「unknown signer app fid」：没有行就不写，已有行照常更新账户与删除状态、保留原 app_fid；SIGNER 到达后自动补上并清除 issue。reference 另有约 4,700 条非空账户已删除，规则无法从协议数据推出，未复刻。
 
 用生产库已采到的原始数据在隔离库里重建并与 reference 对照：verifications 295 行全部命中、时间戳和已知 app_fid 一致；profiles 10 个字段共 888 个值全部一致；profile_external_accounts 10 行全部一致。
 

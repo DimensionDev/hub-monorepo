@@ -259,8 +259,9 @@ function accountIssueHash(fid: number, type: number): Buffer {
 
 /**
  * One row per (fid, type): `account` and `timestamp` from the winning message, `app_fid` from its
- * signer (required: without a known signer the row is not written and an issue records why, until
- * the SIGNER arrives). An empty value, or no active message after one was set, soft-deletes.
+ * signer (required: without a known signer a new row is not written and an issue records why, until
+ * the SIGNER arrives; an existing row is updated and keeps its app fid). An empty value, or no
+ * active message after one was set, soft-deletes.
  */
 export async function projectAccounts(db: AppDb, fid: number): Promise<void> {
   const states = await loadUserData(db, PEA, fid, ACCOUNT_TYPES);
@@ -293,9 +294,9 @@ export async function projectAccounts(db: AppDb, fid: number): Promise<void> {
         ? state.winner.stored.row.timestamp
         : null
       : invalidTime(basis.row);
-    const appFid = apps.get(Buffer.from(basis.row.signer).toString("hex"));
+    const signerApp = apps.get(Buffer.from(basis.row.signer).toString("hex"));
     const hash = accountIssueHash(fid, type);
-    if (appFid === undefined) {
+    if (signerApp === undefined) {
       await recordIssue(
         db,
         PEA,
@@ -304,9 +305,13 @@ export async function projectAccounts(db: AppDb, fid: number): Promise<void> {
         { type, signer: `0x${Buffer.from(basis.row.signer).toString("hex")}` },
         { replace: true },
       );
-      continue;
+      // No row to write without an app fid. An existing row still follows the account (a stale
+      // live account would be worse); it keeps its app fid until the signer is known.
+      if (!row) continue;
+    } else {
+      await clearIssue(db, PEA, hash, ACCOUNT_ISSUE);
     }
-    await clearIssue(db, PEA, hash, ACCOUNT_ISSUE);
+    const appFid = signerApp ?? Number(row?.appFid);
     const timestamp = basis.row.timestamp;
     const values = { account, appFid, timestamp: timestamp.toISOString(), deletedAt: deletedAt?.toISOString() ?? null };
     if (!row) {

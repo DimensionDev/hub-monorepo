@@ -134,11 +134,17 @@ integration("verifications, profiles and profile_external_accounts", () => {
       }),
     );
 
-  const message = (type: MessageType, timestamp: number, hash: number, body: Record<string, unknown>) =>
+  const message = (
+    type: MessageType,
+    timestamp: number,
+    hash: number,
+    body: Record<string, unknown>,
+    signer: Buffer = KEY,
+  ) =>
     Message.create({
       data: { fid: FID, type, timestamp, network: FarcasterNetwork.MAINNET, ...body },
       hash: Buffer.alloc(20, hash),
-      signer: KEY,
+      signer,
     });
   const ETH = Buffer.alloc(20, 0xab);
   const verify = (timestamp: number, hash: number, address: Buffer = ETH, protocol = Protocol.ETHEREUM) =>
@@ -147,8 +153,8 @@ integration("verifications, profiles and profile_external_accounts", () => {
     });
   const unverify = (timestamp: number, hash: number, address: Buffer = ETH, protocol = Protocol.ETHEREUM) =>
     message(MessageType.VERIFICATION_REMOVE, timestamp, hash, { verificationRemoveBody: { address, protocol } });
-  const userData = (type: UserDataType, value: string, timestamp: number, hash: number) =>
-    message(MessageType.USER_DATA_ADD, timestamp, hash, { userDataBody: { type, value } });
+  const userData = (type: UserDataType, value: string, timestamp: number, hash: number, signer?: Buffer) =>
+    message(MessageType.USER_DATA_ADD, timestamp, hash, { userDataBody: { type, value } }, signer);
 
   const verifications = async () =>
     (
@@ -271,6 +277,19 @@ integration("verifications, profiles and profile_external_accounts", () => {
       const cleared = await sql`SELECT 1 FROM public.shuttle_projection_issues
         WHERE projection = 'profile_external_accounts'`.execute(db);
       expect(cleared.rows).toEqual([]);
+    });
+
+    test("a change signed by an unknown key still updates the row, keeping its app fid", async () => {
+      await addSigner(9152);
+      const first = userData(UserDataType.TWITTER, "dwr", 1000, 1);
+      await merge(first);
+      await merge(userData(UserDataType.TWITTER, "", 1100, 2, Buffer.alloc(32, 0x77)), [first]);
+      expect(await accounts()).toEqual([
+        { type: UserDataType.TWITTER, account: "", appFid: 9152, timestamp: at(1100), deletedAt: at(1100) },
+      ]);
+      const pending = await sql<{ reason: string }>`SELECT reason FROM public.shuttle_projection_issues
+        WHERE projection = 'profile_external_accounts'`.execute(db);
+      expect(pending.rows.map((r) => r.reason)).toEqual([ACCOUNT_ISSUE]);
     });
 
     test("one row per type; a new value replaces the account and an empty value soft-deletes", async () => {
