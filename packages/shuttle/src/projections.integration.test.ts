@@ -194,6 +194,9 @@ integration("projection framework", () => {
         calls.push("compact");
         return ok(MessagesResponse.create({ messages: [compactState] }));
       },
+      // Families other registered projections reconcile; nothing to backfill there.
+      getAllVerificationMessagesByFid: async () => ok(MessagesResponse.create({ messages: [] })),
+      getAllUserDataMessagesByFid: async () => ok(MessagesResponse.create({ messages: [] })),
     };
     const reconciler = new MessageReconciliation(hub as unknown as HubRpcClient, db, log);
 

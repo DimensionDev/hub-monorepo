@@ -3,6 +3,8 @@ import { fidsProjection } from "./fids";
 import { signersProjection } from "./signers";
 import { storageRentalsProjection } from "./storageRentals";
 import { tierPurchasesProjection } from "./tierPurchases";
+import { profileExternalAccountsProjection, profilesProjection } from "./userData";
+import { verificationsProjection } from "./verifications";
 import type { Projection } from "./types";
 
 export { ProjectionDispatcher, mutations } from "./dispatcher";
@@ -21,4 +23,7 @@ export const projections: Projection[] = [
   storageRentalsProjection,
   tierPurchasesProjection,
   signersProjection,
+  verificationsProjection,
+  profilesProjection,
+  profileExternalAccountsProjection,
 ];

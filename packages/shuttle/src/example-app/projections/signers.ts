@@ -369,9 +369,19 @@ export async function appFids(db: AppDb, fid: number, keys: Uint8Array[]): Promi
   return new Map(rows.map((row) => [Buffer.from(row.signer).toString("hex"), Number(row.appFid)]));
 }
 
-/** A SIGNER event other projections recompute on (their app fids may change). */
-export function isSignerChange(change: RawChange): boolean {
+function isSignerEvent(change: RawChange): boolean {
   return change.kind === "onchain" && change.event.type === OnChainEventType.EVENT_TYPE_SIGNER && change.event.fid > 0;
+}
+
+/**
+ * A valid SIGNER event, which projections that look up app fids recompute on. Invalid ones are left
+ * to this projection alone, so its rejection keeps them out of `onchain_events` (the dispatcher
+ * stores an on-chain event when any interested projection accepts it).
+ */
+export function isSignerChange(change: RawChange): boolean {
+  return (
+    isSignerEvent(change) && change.kind === "onchain" && validateSignerEvent(fromOnChainEvent(change.event)).isOk()
+  );
 }
 
 async function applySigners({ db }: ProjectionContext, changes: RawChange[]): Promise<void> {
@@ -395,7 +405,7 @@ export const signersProjection: Projection = {
   name: NAME,
   reconcileTypes: [],
   onChainReconcileTypes: [OnChainEventType.EVENT_TYPE_SIGNER],
-  interestedIn: isSignerChange,
+  interestedIn: isSignerEvent,
   validate: (change) => {
     if (change.kind !== "onchain") return invalid("Not an on-chain event");
     const result = validateSignerEvent(fromOnChainEvent(change.event));
