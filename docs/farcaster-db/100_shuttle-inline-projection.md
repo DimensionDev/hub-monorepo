@@ -1,6 +1,6 @@
 # Shuttle 内联业务投影
 
-Status: 现行设计。一期：通用投影框架 + blocks。二期：一次性建好全部业务表（迁移 008）、dispatcher 支持链上事件、fids 投影与 ID_REGISTER 链上补齐。
+Status: 现行设计。一期：通用投影框架 + blocks。二期：一次性建好全部业务表（迁移 008）、dispatcher 支持链上事件、fids 投影与 ID_REGISTER 链上补齐。三期：storage_rentals 投影与 STORAGE_RENT 链上补齐。
 
 ## 背景
 
@@ -55,8 +55,9 @@ projections/
   ids.ts          确定性 UUIDv5
   blocks.ts       blocks 投影
   fids.ts         fids 投影（onchain_events 的 ID_REGISTER）
+  storageRentals.ts storage_rentals 投影（onchain_events 的 STORAGE_RENT）
   backfill.ts     只补投影的 backfill（消息 + 链上事件）
-  index.ts        注册表：projections = [blocksProjection, fidsProjection]
+  index.ts        注册表：projections = [blocksProjection, fidsProjection, storageRentalsProjection]
 raw/
   onchainEvents.ts  onchain_events 原始落库（幂等）
 reference/
@@ -198,6 +199,21 @@ SELECT pg_advisory_xact_lock(hashtextextended(<schema> || ':shuttle:fid:' || <fi
 `Projection.onChainReconcileTypes` 声明需要的链上事件类型（fids 为 `EVENT_TYPE_ID_REGISTER`）。只补投影的 backfill 和全量 backfill 都会对每个 fid 调 `OnChainEventReconciliation`，把库里缺的事件交给 `processMissingOnChainEvents`。生产 `onchain_events` 只有 59 条 ID_REGISTER（58 个 fid），大部分 fid 缺 REGISTER，必须靠这一步补齐。
 
 上线顺序：部署（008 建表）→ `rebuild` REBUILD_PROJECTIONS=fids → 只补投影的 backfill（`BACKFILL_PROJECTIONS_ONLY=true`）→ 抽样与 reference.fids 核对。
+
+## storage_rentals 投影
+
+规则来自 [000012](000012_storage_rentals-%E5%88%86%E6%9E%90%E4%B8%8E%E5%AE%9E%E7%8E%B0%E8%AE%A1%E5%88%92.md) 和 Go `initreceipts/model.go`：
+
+- 只关心 `type=4`（STORAGE_RENT）。每次 apply 对涉及的 fid 从 `onchain_events` 全量重算该 fid 的收据；不需要 Go 的 `conversion_state.storage_rentals` 辅助状态和水位。
+- 一张收据一行，身份为 `(chain_id, tx_hash, log_index)`，`id = conversionId("storage_rentals", "10:<tx hex>:<log>")`（与 Go 一致）。同用户多次租赁、同一交易里的多张收据各自成行；过期收据保留。
+- `units`、`expiry` 取自 body，必须是非负整数且能放进目标列（缺失不等于 0）；`expiry` 是 Shuttle 已按区块时间算好的 Unix 秒，直接转 UTC，与 reference 抽查一致。`timestamp` 为区块时间。
+- 校验：chain 必须是 10、fid 在 1..int32 内、交易哈希 32 字节、log_index 非负。实时到达的不合格事件按 issue 记录，不落原始表（同 fids）。fid 0 的租赁（reference 有 6 条）投影不接：dispatcher 按 fid 加锁、拒绝 fid 0，接了会让 hub 事件失败；它们仍按通用路径落原始表，是已知缺口。
+- 同一收据在不同区块出现：内容一致则合并（取较新区块），内容冲突则记 issue、不写该收据。
+- 写入只插入或更新，不删除；按 id 查已有行（reference 没有 transaction_hash 索引），fid 修正时原地更新，保留 id 与 `created_at`，业务字段不变不动 `updated_at`。
+- issue 以交易哈希为 subject，每条 reason 都带 fid 与 log_index，同一交易的多张收据互不覆盖。rebuild 遇到坏收据只记 issue、不判失败：原始事件不可变，抛错会让该 fid 的正常收据每次都回滚。
+- `onChainReconcileTypes = [EVENT_TYPE_STORAGE_RENT]`。生产 `onchain_events` 目前只有投影上线前已采到的近期租赁（2026-11-17 起），历史租赁靠只补投影的 backfill 从 hub 拉取。
+
+上线顺序：部署 → `rebuild` REBUILD_PROJECTIONS=storage_rentals → 只补投影的 backfill（`BACKFILL_PROJECTIONS_ONLY=true`；目前不能单选投影，会对每个 fid 重新对账全部已注册投影的消息族和链上事件，上次 blocks + fids 全量用了约 3.9 小时；需 backfill worker 在线）→ 抽样与 reference.storage_rentals 核对。
 
 ## 增加一张新业务表
 

@@ -297,7 +297,8 @@ integration("projection framework", () => {
   });
 
   test("replayed on-chain events are stored once", async () => {
-    const onChainEvent = Factories.StorageRentOnChainEvent.build({ blockNumber: 77, logIndex: 3 });
+    // A type no projection handles, so this exercises the generic raw path.
+    const onChainEvent = Factories.SignerMigratedOnChainEvent.build({ blockNumber: 77, logIndex: 3 });
     const event = HubEvent.create({
       id: 9,
       type: HubEventType.MERGE_ON_CHAIN_EVENT,

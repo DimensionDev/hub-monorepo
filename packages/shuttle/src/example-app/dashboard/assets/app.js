@@ -34,7 +34,13 @@ function icons(root = document) {
 }
 
 const projectionTitles = { blocks: "屏蔽关系" };
-const statLabels = { total: "总行数", active: "有效", blockers: "发起屏蔽的用户" };
+const statLabels = {
+  total: "总行数",
+  active: "有效",
+  blockers: "发起屏蔽的用户",
+  unexpired: "未过期",
+  renters: "租赁账号",
+};
 const messageTypes = {
   1: "CAST_ADD",
   2: "CAST_REMOVE",

@@ -83,6 +83,17 @@ export interface AppTables extends HubTables {
     recoveryAddress: Uint8Array | null;
     registeredAt: ColumnType<Date | null, string | null, string | null>;
   };
+  storageRentals: {
+    id: string;
+    createdAt: ColumnType<Date, string, string>;
+    updatedAt: ColumnType<Date, string, string>;
+    fid: number;
+    units: number;
+    expiry: ColumnType<Date, string, string>;
+    timestamp: ColumnType<Date, string, string>;
+    transactionHash: Uint8Array | null;
+    logIndex: number | null;
+  };
   shuttleMessageState: {
     fid: number;
     hash: Uint8Array;

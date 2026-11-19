@@ -12,11 +12,11 @@ updated: 2026-11-16
 > **部分取代**
 > 业务规则章节仍有效。snapshot/init/restart/resume/CLI 相关章节已被 shuttle 内联投影取代，见 [100_shuttle-inline-projection](100_shuttle-inline-projection.md)。
 
-Status: ready-for-agent
+Status: 已实现为 shuttle 内联投影（`example-app/projections/storageRentals.ts`，见 [100](100_shuttle-inline-projection.md#storage_rentals-投影)）。
 
 ## 已确认的来源与结构
 
-reference结构已于2026-11-16只读检查并保存：9列、4个索引，只有id主键，fid/units为integer，expiry/timestamp必填，transaction_hash/log_index可空。当前reference暂时连接超时，继续使用已保存结构做本地实现和测试，真实建表前重新连接核对。
+reference结构已于2026-11-16只读检查并保存：9列、4个索引，只有id主键，fid/units为integer，expiry/timestamp必填，transaction_hash/log_index可空。2026-11-17重新读取的结构由迁移008建表并校验，与此一致。2026-11-18只读抽查（小样本，非100条抽查）：source最早3条租赁（2026年，1年期）在reference中的fid、units、expiry、timestamp、transaction_hash、log_index与本文口径一致；另查reference中fid 2、3、194等的历史租赁，expiry−timestamp在2024-08-29前为3年、2025-07-16前为2年，与Shuttle `getStorageUnitExpiry`的三段规则一致，说明expiry直接取body.expiry即可。reference有6条fid=0的租赁；dispatcher按fid加锁并拒绝fid 0，内联投影不接这类事件（仍走通用原始落库），属于已知缺口。
 
 source来自onchain_events.type=4的存储租赁事件，当前已有数百条，chain_id=10。它记录一次租赁收据，不是账户余额；过期记录仍保留，不因当前时间过期而删除。messages.type=15的LEND_STORAGE不是新的链上租赁，不能混入。
 
@@ -32,9 +32,11 @@ source来自onchain_events.type=4的存储租赁事件，当前已有数百条�
 
 链上位置和完整输入保存在辅助状态中。较旧位置不覆盖已知较新投影，同一位置源字段修正可重新计算。相同收据重复内容合并；相同身份内容冲突不以UUID决定，明确报告。
 
+内联投影不再需要辅助状态：原始onchain_events只增不改，每次按fid从全部type=4事件重算，结果与顺序无关。
+
 ## 缺口记录
 
-每个无法生成的收据保存run_id、source_id、fid、已知的交易和log_index、missing_fields、reason。必填内容或身份缺失不创建不完整收据。source没有提供的历史租赁无法补出，记录来源时间范围及数量，不复制reference记录。
+每个无法生成的收据保存run_id、source_id、fid、已知的交易和log_index、missing_fields、reason（内联投影中记在shuttle_projection_issues：subject为交易哈希，reason含fid、log_index和缺失字段，payload含chain、区块和log_index）。必填内容或身份缺失不创建不完整收据。source没有提供的历史租赁无法补出，记录来源时间范围及数量，不复制reference记录。
 
 ## 实施步骤
 

@@ -65,9 +65,8 @@ export const BUSINESS_TABLES: BusinessTable[] = [
     table: "storage_rentals",
     title: "存储租赁",
     source: "onchain_events：STORAGE_RENT（type=4）",
-    note: "Go 版代码和隔离验证已完成，按同一口径移植为投影。LEND_STORAGE 消息不算一次链上租赁。",
-    prerequisites: ["dispatcher 支持 onchain 变更", "接入 OnChainEvent reconciliation"],
-    docs: ["000012_storage_rentals-分析与实现计划.md"],
+    note: "实时投影与 STORAGE_RENT 只补投影 backfill 已上线，按 Go 版口径按收据（chain、交易、log）生成。LEND_STORAGE 消息不算一次链上租赁。",
+    docs: ["000012_storage_rentals-分析与实现计划.md", "100_shuttle-inline-projection.md"],
     stage: "planned",
   },
   {

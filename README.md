@@ -156,11 +156,11 @@ pnpm --dir packages/core build && pnpm --dir packages/hub-nodejs build && pnpm -
 
 Shuttle 集成测试会重建 `shuttle_test` 数据库并清空测试 Redis。只使用隔离的本地测试实例，禁止使用服务器 `.env` 或 `.env.development` 运行测试。
 
-blocks、fids 和投影框架集成测试（`src/blocks.integration.test.ts`、`src/fids.integration.test.ts`、`src/projections.integration.test.ts`）只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
+blocks、fids、storage_rentals 和投影框架集成测试（`src/blocks.integration.test.ts`、`src/fids.integration.test.ts`、`src/storageRentals.integration.test.ts`、`src/projections.integration.test.ts`）只使用显式的 `TEST_DATABASE_URL`，为每次测试创建并删除随机命名的独立数据库，不读取应用连接配置；未指定时跳过。测试账号需要 CREATEDB 权限。
 
 ```bash
 cd packages/shuttle
 TEST_DATABASE_URL='postgres://shuttle@127.0.0.1:55441/postgres' \
   NODE_ENV=test NODE_OPTIONS=--experimental-vm-modules \
-  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts src/fids.integration.test.ts src/projections.integration.test.ts --runInBand
+  ../../node_modules/.bin/jest --runTestsByPath src/blocks.integration.test.ts src/fids.integration.test.ts src/storageRentals.integration.test.ts src/projections.integration.test.ts --runInBand
 ```
