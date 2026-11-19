@@ -56,7 +56,11 @@ export const BUSINESS_TABLES: BusinessTable[] = [
     title: "用户名",
     source: "用户名证明（USERNAME_PROOF 消息与 hub 用户名证明）",
     note: "按 000011 / 000017 的规则转换并与 reference 校验。",
-    prerequisites: ["用户名证明原始落库", "接入 UsernameProof reconciliation"],
+    prerequisites: [
+      "用户名证明原始落库（迁移 004 未注册，MERGE_USERNAME_PROOF 未处理）",
+      "dispatcher 新变更类型（fname 转移需锁两个 fid）",
+      "接入 UsernameProof reconciliation",
+    ],
     docs: ["000011_usernames-分析与实现计划.md", "000017_usernames转换与reference校验.md"],
     stage: "planned",
   },
