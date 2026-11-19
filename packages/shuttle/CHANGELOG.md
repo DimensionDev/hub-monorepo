@@ -1,5 +1,22 @@
 # @farcaster/hub-shuttle
 
+## 3.0.0
+
+### Major Changes
+
+- 6c0562e29b95a7f45b922c05dbdbe1ed89b9d3dc: Rename the raw username proof table from `usernames` to `username_proofs` (`HubTables.username_proofs`; `UsernamesTable` is kept as a deprecated alias of `UsernameProofsTable`) so the business `usernames` table can share the schema. The example app now creates every reference business table (migration 008), projects on-chain events through the projection dispatcher, and adds the fids projection with ID_REGISTER on-chain backfill.
+
+  `getDbClient` now attaches a pool `error` listener, so an idle connection dropped by the server is logged instead of crashing the process.
+
+### Minor Changes
+
+- 12417babea816f5b38c6d87278de37579fb9a6f3: The example app adds projections for signers (on-chain SIGNER events, app fid from the SignedKeyRequest metadata), tier_purchases (sharing the receipt logic with storage_rentals), verifications, profiles and profile_external_accounts. Projections that need an app fid look keys up in signers and recompute when a SIGNER event arrives. Backfill now reconciles on-chain events before messages.
+- 144ce9320a93a4620e05557cfc298d7b0b6077e5: The example app adds the storage_rentals projection: one row per on-chain STORAGE_RENT receipt (keyed by chain, transaction hash and log index, with Go-compatible ids), recomputed per fid from `onchain_events`, with STORAGE_RENT on-chain backfill. Invalid or conflicting receipts are recorded as projection issues and skipped.
+
+### Patch Changes
+
+- b9e68510a003ced63eebc95bb5f0b7a24828ced3: Add transactional blocks projection to the Shuttle example app, including reference-compatible migrations and replay protection for message lifecycle events.
+
 ## 2.0.0
 
 ### Major Changes
