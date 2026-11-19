@@ -40,6 +40,8 @@ const statLabels = {
   blockers: "发起屏蔽的用户",
   unexpired: "未过期",
   renters: "租赁账号",
+  buyers: "购买账号",
+  pending: "待补",
 };
 const messageTypes = {
   1: "CAST_ADD",

@@ -185,6 +185,20 @@ export class App implements MessageHandler {
       return;
     }
     for (const fid of fids) {
+      // On-chain history the projections need (e.g. ID_REGISTER for fids) goes through the same pipeline,
+      // first: projections that attribute messages to an app read the signers SIGNER events write.
+      const onChainTypes = onChainReconcileTypesFor(projections);
+      if (onChainTypes.length) {
+        const missing: Parameters<ProjectionDispatcher["processMissingOnChainEvents"]>[1] = [];
+        await onChainReconciler.reconcileOnChainEventsForFid(
+          fid,
+          async (event, missingInDb) => {
+            if (missingInDb) missing.push(event);
+          },
+          { types: onChainTypes },
+        );
+        await dispatcherFor(this.dbSchema).processMissingOnChainEvents(this.db, missing);
+      }
       await reconciler.reconcileMessagesForFid(
         fid,
         async (message, missingInDb, prunedInDb, revokedInDb) => {
@@ -202,19 +216,6 @@ export class App implements MessageHandler {
           }
         },
       );
-      // On-chain history the projections need (e.g. ID_REGISTER for fids) goes through the same pipeline.
-      const onChainTypes = onChainReconcileTypesFor(projections);
-      if (onChainTypes.length) {
-        const missing: Parameters<ProjectionDispatcher["processMissingOnChainEvents"]>[1] = [];
-        await onChainReconciler.reconcileOnChainEventsForFid(
-          fid,
-          async (event, missingInDb) => {
-            if (missingInDb) missing.push(event);
-          },
-          { types: onChainTypes },
-        );
-        await dispatcherFor(this.dbSchema).processMissingOnChainEvents(this.db, missing);
-      }
     }
   }
 
